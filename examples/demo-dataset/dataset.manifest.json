@@ -1,0 +1,11 @@
+{
+  "items": [
+    {
+      "path": "sample.wav",
+      "reference_text": "hello world",
+      "language": "en",
+      "speaker": "demo-speaker",
+      "tags": ["demo", "smoke-test"]
+    }
+  ]
+}

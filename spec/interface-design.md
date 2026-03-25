@@ -103,6 +103,33 @@ interface AccuracyMetrics {
 }
 ```
 
+```ts
+interface BenchAttemptRecord {
+  attempt_id: string;
+  run_id: string;
+  provider_id: string;
+  audio_id: string;
+  audio_path: string;
+  audio_duration_ms?: number;
+  audio_language?: string;
+  audio_speaker?: string;
+  audio_tags?: string[];
+  audio_reference_path?: string;
+  round_index: number;
+  started_at: string;
+  finished_at: string;
+  latency_ms: number;
+  rtf?: number;
+  success: boolean;
+  request_attempts: number;
+  retry_count: number;
+  http_status?: number;
+  error?: ProviderExecutionError;
+  normalized_result?: NormalizedAsrResult;
+  evaluation?: AccuracyMetrics;
+}
+```
+
 ## 4. Provider 配置示例
 
 ### 4.1 OpenAI-compatible
@@ -225,6 +252,8 @@ asrbench --db artifacts/asrbench.sqlite ui:serve --port 3000
 
 ```http
 GET /api/providers
+GET /api/jobs
+GET /api/jobs/:job_id
 GET /api/runs
 GET /api/runs/:run_id
 GET /api/runs/:run_id/attempts/:attempt_id/raw
@@ -234,10 +263,12 @@ GET /
 
 说明：
 - `/api/providers` 返回已加载的 provider 配置摘要，用于 UI 选择
+- `/api/jobs` 返回最近的浏览器触发 run job 列表
+- `/api/jobs/:job_id` 返回单个后台 job 的状态、错误、summary
 - `/api/runs` 返回 run summary 列表
 - `/api/runs` 支持 `provider`、`mode`、`failures`、`created_after`、`created_before`、`query`
 - `/api/runs/:run_id` 返回 summary + attempts
-- `/api/run` 支持直接触发 `run:once` / `run:duration`
+- `/api/run` 创建后台 job；成功时返回 `202 Accepted`
 - `/` 返回最小 dashboard 页面
 
 ### 7.1 Dataset Manifest
@@ -276,5 +307,18 @@ GET /
   "manifestPath": "/path/to/audio/dataset.manifest.json",
   "referenceSidecar": false,
   "referenceDir": "/path/to/references"
+}
+```
+
+错误返回：
+
+```json
+{
+  "error": "validation_failed",
+  "message": "Please fix the highlighted fields and try again.",
+  "field_errors": {
+    "inputPath": "Input path does not exist.",
+    "providerIds": "Select at least one provider."
+  }
 }
 ```

@@ -1,8 +1,10 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { URL } from 'node:url';
+import type { BenchRunSummary } from '../domain/types.js';
 import { loadProvidersConfig } from '../config/loadProviders.js';
 import { runDuration } from './runDurationService.js';
 import { runOnce } from './runOnceService.js';
@@ -22,125 +24,201 @@ export interface RunningUiServer {
   close(): Promise<void>;
 }
 
+interface RunSubmissionPayload {
+  mode: 'once' | 'duration';
+  providerIds: string[];
+  inputPath: string;
+  rounds?: number;
+  durationMs?: number;
+  concurrency?: number;
+  intervalMs?: number;
+  manifestPath?: string;
+  referenceSidecar?: boolean;
+  referenceDir?: string;
+}
+
+export interface RunSubmission {
+  mode: 'once' | 'duration';
+  providerIds: string[];
+  inputPath: string;
+  rounds: number;
+  durationMs: number;
+  concurrency?: number;
+  intervalMs?: number;
+  manifestPath?: string;
+  referenceSidecar: boolean;
+  referenceDir?: string;
+}
+
+interface RunValidationResult {
+  ok: boolean;
+  fieldErrors: Record<string, string>;
+  value?: RunSubmission;
+}
+
+export interface UiRunJob {
+  job_id: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+  request: RunSubmission;
+  summary?: BenchRunSummary;
+  error?: {
+    message: string;
+    field_errors?: Record<string, string>;
+  };
+}
+
 export async function startUiServer(options: UiServerOptions): Promise<RunningUiServer> {
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 3000;
+  const runJobs = new Map<string, UiRunJob>();
 
   const server = http.createServer(async (request, response) => {
-    const requestUrl = new URL(request.url ?? '/', `http://${host}:${port}`);
+    try {
+      const requestUrl = new URL(request.url ?? '/', `http://${host}:${port}`);
 
-    if (requestUrl.pathname === '/') {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      response.end(renderIndexHtml());
-      return;
-    }
-
-    if (requestUrl.pathname === '/api/runs') {
-      const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '50', 10);
-      const runs = await listRunsFromSqlite(options.dbPath, {
-        limit: Number.isFinite(limit) ? limit : 50,
-        providerId: requestUrl.searchParams.get('provider') ?? undefined,
-        mode: (requestUrl.searchParams.get('mode') as 'once' | 'duration' | null) ?? undefined,
-        hasFailures:
-          requestUrl.searchParams.get('failures') === null
-            ? undefined
-            : ['yes', 'true', '1'].includes((requestUrl.searchParams.get('failures') ?? '').toLowerCase()),
-        createdAfter: requestUrl.searchParams.get('created_after') ?? undefined,
-        createdBefore: requestUrl.searchParams.get('created_before') ?? undefined,
-        query: requestUrl.searchParams.get('query') ?? undefined,
-      });
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ runs }, null, 2));
-      return;
-    }
-
-    if (requestUrl.pathname === '/api/providers') {
-      const providersFile = await loadProvidersConfig(options.configPath);
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ providers: providersFile.providers }, null, 2));
-      return;
-    }
-
-    const match = requestUrl.pathname.match(/^\/api\/runs\/([^/]+)$/);
-    if (match) {
-      const run = await getRunDetailFromSqlite(options.dbPath, decodeURIComponent(match[1]));
-      if (!run) {
-        response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'run_not_found' }));
-        return;
-      }
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify(run, null, 2));
-      return;
-    }
-
-    const rawMatch = requestUrl.pathname.match(/^\/api\/runs\/([^/]+)\/attempts\/([^/]+)\/raw$/);
-    if (rawMatch) {
-      const run = await getRunDetailFromSqlite(options.dbPath, decodeURIComponent(rawMatch[1]));
-      if (!run) {
-        response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'run_not_found' }));
+      if (requestUrl.pathname === '/') {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end(renderIndexHtml());
         return;
       }
 
-      const rawAttempt = await readRawAttemptArtifact(run.summary.attempts_path, decodeURIComponent(rawMatch[2]));
-      if (!rawAttempt) {
-        response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'raw_attempt_not_found' }));
+      if (requestUrl.pathname === '/api/runs') {
+        const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '50', 10);
+        const runs = await listRunsFromSqlite(options.dbPath, {
+          limit: Number.isFinite(limit) ? limit : 50,
+          providerId: requestUrl.searchParams.get('provider') ?? undefined,
+          mode: (requestUrl.searchParams.get('mode') as 'once' | 'duration' | null) ?? undefined,
+          hasFailures:
+            requestUrl.searchParams.get('failures') === null
+              ? undefined
+              : ['yes', 'true', '1'].includes((requestUrl.searchParams.get('failures') ?? '').toLowerCase()),
+          createdAfter: requestUrl.searchParams.get('created_after') ?? undefined,
+          createdBefore: requestUrl.searchParams.get('created_before') ?? undefined,
+          query: requestUrl.searchParams.get('query') ?? undefined,
+        });
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ runs }, null, 2));
         return;
       }
 
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify(rawAttempt, null, 2));
-      return;
+      if (requestUrl.pathname === '/api/providers') {
+        const providersFile = await loadProvidersConfig(options.configPath);
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ providers: providersFile.providers }, null, 2));
+        return;
+      }
+
+      if (requestUrl.pathname === '/api/jobs') {
+        const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '10', 10);
+        const jobs = listRunJobs(runJobs, Number.isFinite(limit) ? limit : 10);
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ jobs }, null, 2));
+        return;
+      }
+
+      const jobMatch = requestUrl.pathname.match(/^\/api\/jobs\/([^/]+)$/);
+      if (jobMatch) {
+        const job = runJobs.get(decodeURIComponent(jobMatch[1]));
+        if (!job) {
+          response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: 'job_not_found' }));
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ job }, null, 2));
+        return;
+      }
+
+      const match = requestUrl.pathname.match(/^\/api\/runs\/([^/]+)$/);
+      if (match) {
+        const run = await getRunDetailFromSqlite(options.dbPath, decodeURIComponent(match[1]));
+        if (!run) {
+          response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: 'run_not_found' }));
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify(run, null, 2));
+        return;
+      }
+
+      const rawMatch = requestUrl.pathname.match(/^\/api\/runs\/([^/]+)\/attempts\/([^/]+)\/raw$/);
+      if (rawMatch) {
+        const run = await getRunDetailFromSqlite(options.dbPath, decodeURIComponent(rawMatch[1]));
+        if (!run) {
+          response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: 'run_not_found' }));
+          return;
+        }
+
+        const rawAttempt = await readRawAttemptArtifact(run.summary.attempts_path, decodeURIComponent(rawMatch[2]));
+        if (!rawAttempt) {
+          response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: 'raw_attempt_not_found' }));
+          return;
+        }
+
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify(rawAttempt, null, 2));
+        return;
+      }
+
+      if (request.method === 'POST' && requestUrl.pathname === '/api/run') {
+        const payload = (await readJsonBody(request)) as RunSubmissionPayload;
+        const providersFile = await loadProvidersConfig(options.configPath);
+        const validation = await validateRunSubmission(payload, providersFile.providers.map((provider) => provider.provider_id));
+        if (!validation.ok) {
+          response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(
+            JSON.stringify(
+              {
+                error: 'validation_failed',
+                message: 'Please fix the highlighted fields and try again.',
+                field_errors: validation.fieldErrors,
+              },
+              null,
+              2,
+            ),
+          );
+          return;
+        }
+
+        const requestBody = validation.value;
+        if (!requestBody) {
+          throw new Error('validated run submission missing request body');
+        }
+        const job: UiRunJob = {
+          job_id: `job_${crypto.randomUUID().slice(0, 8)}`,
+          status: 'queued',
+          created_at: new Date().toISOString(),
+          request: requestBody,
+        };
+        runJobs.set(job.job_id, job);
+        void executeRunJob(job, options, runJobs);
+
+        response.writeHead(202, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ job }, null, 2));
+        return;
+      }
+
+      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end('Not found');
+    } catch (error) {
+      response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(
+        JSON.stringify(
+          {
+            error: 'internal_error',
+            message: error instanceof Error ? error.message : String(error),
+          },
+          null,
+          2,
+        ),
+      );
     }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/run') {
-      const payload = (await readJsonBody(request)) as {
-        mode: 'once' | 'duration';
-        providerIds: string[];
-        inputPath: string;
-        rounds?: number;
-        durationMs?: number;
-        concurrency?: number;
-        intervalMs?: number;
-        manifestPath?: string;
-        referenceSidecar?: boolean;
-        referenceDir?: string;
-      };
-
-      const summary =
-        payload.mode === 'duration'
-          ? await runDuration({
-              configPath: options.configPath,
-              providerIds: payload.providerIds,
-              inputPath: payload.inputPath,
-              durationMs: payload.durationMs ?? 30_000,
-              concurrency: payload.concurrency,
-              intervalMs: payload.intervalMs,
-              dbPath: options.dbPath,
-              manifestPath: payload.manifestPath,
-              referenceSidecar: payload.referenceSidecar,
-              referenceDir: payload.referenceDir,
-            })
-          : await runOnce({
-              configPath: options.configPath,
-              providerIds: payload.providerIds,
-              inputPath: payload.inputPath,
-              rounds: payload.rounds ?? 1,
-              dbPath: options.dbPath,
-              manifestPath: payload.manifestPath,
-              referenceSidecar: payload.referenceSidecar,
-              referenceDir: payload.referenceDir,
-            });
-
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ summary }, null, 2));
-      return;
-    }
-
-    response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    response.end('Not found');
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -166,6 +244,157 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
         });
       }),
   };
+}
+
+export async function validateRunSubmission(
+  payload: RunSubmissionPayload,
+  knownProviderIds: string[],
+): Promise<RunValidationResult> {
+  const fieldErrors: Record<string, string> = {};
+  const mode = payload.mode === 'duration' ? 'duration' : 'once';
+  const providerIds = Array.isArray(payload.providerIds)
+    ? payload.providerIds.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  const inputPath = typeof payload.inputPath === 'string' ? payload.inputPath.trim() : '';
+  const manifestPath = typeof payload.manifestPath === 'string' ? payload.manifestPath.trim() : '';
+  const referenceDir = typeof payload.referenceDir === 'string' ? payload.referenceDir.trim() : '';
+  const rounds = toPositiveInteger(payload.rounds, mode === 'once' ? 1 : 1);
+  const durationMs = toPositiveInteger(payload.durationMs, mode === 'duration' ? 30_000 : 30_000);
+  const concurrency = payload.concurrency === undefined ? undefined : toPositiveInteger(payload.concurrency, 1);
+  const intervalMs = payload.intervalMs === undefined ? undefined : toNonNegativeInteger(payload.intervalMs, 0);
+
+  if (!inputPath) {
+    fieldErrors.inputPath = 'Input path is required.';
+  } else if (!(await pathExists(inputPath))) {
+    fieldErrors.inputPath = 'Input path does not exist.';
+  }
+
+  if (providerIds.length === 0) {
+    fieldErrors.providerIds = 'Select at least one provider.';
+  } else {
+    const unknown = providerIds.filter((providerId) => !knownProviderIds.includes(providerId));
+    if (unknown.length > 0) {
+      fieldErrors.providerIds = `Unknown providers: ${unknown.join(', ')}`;
+    }
+  }
+
+  if (manifestPath && !(await pathExists(manifestPath))) {
+    fieldErrors.manifestPath = 'Manifest path does not exist.';
+  }
+  if (referenceDir && !(await pathExists(referenceDir))) {
+    fieldErrors.referenceDir = 'Reference directory does not exist.';
+  }
+
+  if (mode === 'once' && rounds < 1) {
+    fieldErrors.rounds = 'Rounds must be >= 1.';
+  }
+  if (mode === 'duration' && durationMs < 1) {
+    fieldErrors.durationMs = 'Duration must be >= 1 ms.';
+  }
+  if (concurrency !== undefined && concurrency < 1) {
+    fieldErrors.concurrency = 'Concurrency must be >= 1.';
+  }
+  if (intervalMs !== undefined && intervalMs < 0) {
+    fieldErrors.intervalMs = 'Interval must be >= 0.';
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return {
+      ok: false,
+      fieldErrors,
+    };
+  }
+
+  return {
+    ok: true,
+    fieldErrors,
+    value: {
+      mode,
+      providerIds,
+      inputPath,
+      rounds,
+      durationMs,
+      concurrency,
+      intervalMs,
+      manifestPath: manifestPath || undefined,
+      referenceSidecar: Boolean(payload.referenceSidecar),
+      referenceDir: referenceDir || undefined,
+    },
+  };
+}
+
+export async function executeRunJob(
+  job: UiRunJob,
+  options: Pick<UiServerOptions, 'configPath' | 'dbPath'>,
+  runJobs: Map<string, UiRunJob>,
+): Promise<void> {
+  job.status = 'running';
+  job.started_at = new Date().toISOString();
+  runJobs.set(job.job_id, job);
+
+  try {
+    const summary =
+      job.request.mode === 'duration'
+        ? await runDuration({
+            configPath: options.configPath,
+            providerIds: job.request.providerIds,
+            inputPath: job.request.inputPath,
+            durationMs: job.request.durationMs,
+            concurrency: job.request.concurrency,
+            intervalMs: job.request.intervalMs,
+            dbPath: options.dbPath,
+            manifestPath: job.request.manifestPath,
+            referenceSidecar: job.request.referenceSidecar,
+            referenceDir: job.request.referenceDir,
+          })
+        : await runOnce({
+            configPath: options.configPath,
+            providerIds: job.request.providerIds,
+            inputPath: job.request.inputPath,
+            rounds: job.request.rounds,
+            dbPath: options.dbPath,
+            manifestPath: job.request.manifestPath,
+            referenceSidecar: job.request.referenceSidecar,
+            referenceDir: job.request.referenceDir,
+          });
+
+    job.status = 'succeeded';
+    job.summary = summary;
+    job.finished_at = new Date().toISOString();
+    runJobs.set(job.job_id, job);
+  } catch (error) {
+    job.status = 'failed';
+    job.finished_at = new Date().toISOString();
+    job.error = {
+      message: error instanceof Error ? error.message : String(error),
+    };
+    runJobs.set(job.job_id, job);
+  }
+}
+
+function listRunJobs(runJobs: Map<string, UiRunJob>, limit: number): UiRunJob[] {
+  return Array.from(runJobs.values())
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, Math.max(1, limit));
+}
+
+function toPositiveInteger(value: unknown, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? fallback), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toNonNegativeInteger(value: unknown, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? fallback), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.stat(path.resolve(targetPath));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function renderIndexHtml(): string {
@@ -455,6 +684,10 @@ function renderIndexHtml(): string {
           <h3 style="margin-bottom:10px;">Create Run</h3>
           <div id="run-create-controls" class="controls"></div>
         </div>
+        <div class="panel" style="margin-top:16px;">
+          <h3 style="margin-bottom:10px;">Background Jobs</h3>
+          <div id="job-list"></div>
+        </div>
         <div id="run-list" class="run-list"></div>
       </aside>
       <main class="content" id="content">
@@ -465,6 +698,7 @@ function renderIndexHtml(): string {
       const state = {
         runs: [],
         providers: [],
+        jobs: [],
         activeRunId: null,
         activeRun: null,
         rawAttemptById: {},
@@ -487,6 +721,9 @@ function renderIndexHtml(): string {
           referenceDir: '',
         },
         isSubmittingRun: false,
+        runFormErrors: {},
+        runFormMessage: '',
+        seenCompletedJobs: {},
         filters: {
           provider: 'all',
           status: 'all',
@@ -542,6 +779,7 @@ function renderIndexHtml(): string {
       function renderRunSidebarControls() {
         renderRunFilterControls();
         renderRunCreateControls();
+        renderJobList();
       }
 
       function renderRunFilterControls() {
@@ -575,6 +813,7 @@ function renderIndexHtml(): string {
       function renderRunCreateControls() {
         const root = document.getElementById('run-create-controls');
         if (!root) return;
+        const isDuration = state.runForm.mode === 'duration';
         const providerCheckboxes = state.providers.length
           ? state.providers.map((provider) =>
               '<label style="text-transform:none;letter-spacing:0;font-size:13px;">' +
@@ -585,22 +824,29 @@ function renderIndexHtml(): string {
             ).join('')
           : '<div class="muted">No providers loaded.</div>';
 
+        const error = (field) => state.runFormErrors[field] ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(state.runFormErrors[field]) + '</div>' : '';
+        const message = state.runFormMessage
+          ? '<div class="detail-block" style="padding:10px 12px;font-size:12px;">' + escapeHtml(state.runFormMessage) + '</div>'
+          : '';
+
         root.innerHTML =
+          message +
           '<label>Mode<select id="run-form-mode">' +
             '<option value="once"' + (state.runForm.mode === 'once' ? ' selected' : '') + '>Once</option>' +
             '<option value="duration"' + (state.runForm.mode === 'duration' ? ' selected' : '') + '>Duration</option>' +
-          '</select></label>' +
-          '<label>Input path<input id="run-form-input" type="text" placeholder="/path/to/audio" value="' + escapeHtml(state.runForm.inputPath) + '" /></label>' +
-          '<label>Manifest path<input id="run-form-manifest" type="text" placeholder="/path/to/manifest.json" value="' + escapeHtml(state.runForm.manifestPath) + '" /></label>' +
-          '<label>Reference dir<input id="run-form-reference-dir" type="text" placeholder="/path/to/references" value="' + escapeHtml(state.runForm.referenceDir) + '" /></label>' +
-          '<label>Rounds<input id="run-form-rounds" type="number" min="1" value="' + escapeHtml(state.runForm.rounds) + '" /></label>' +
-          '<label>Duration ms<input id="run-form-duration" type="number" min="1" value="' + escapeHtml(state.runForm.durationMs) + '" /></label>' +
-          '<label>Concurrency<input id="run-form-concurrency" type="number" min="1" value="' + escapeHtml(state.runForm.concurrency) + '" /></label>' +
-          '<label>Interval ms<input id="run-form-interval" type="number" min="0" value="' + escapeHtml(state.runForm.intervalMs) + '" /></label>' +
+          '</select></label>' + error('mode') +
+          '<label>Input path<input id="run-form-input" type="text" placeholder="/path/to/audio" value="' + escapeHtml(state.runForm.inputPath) + '" /></label>' + error('inputPath') +
+          '<label>Manifest path<input id="run-form-manifest" type="text" placeholder="/path/to/manifest.json" value="' + escapeHtml(state.runForm.manifestPath) + '" /></label>' + error('manifestPath') +
+          '<label>Reference dir<input id="run-form-reference-dir" type="text" placeholder="/path/to/references" value="' + escapeHtml(state.runForm.referenceDir) + '" /></label>' + error('referenceDir') +
+          '<label>Rounds<input id="run-form-rounds" type="number" min="1" value="' + escapeHtml(state.runForm.rounds) + '"' + (isDuration ? ' disabled' : '') + ' /></label>' + error('rounds') +
+          '<label>Duration ms<input id="run-form-duration" type="number" min="1" value="' + escapeHtml(state.runForm.durationMs) + '"' + (isDuration ? '' : ' disabled') + ' /></label>' + error('durationMs') +
+          '<label>Concurrency<input id="run-form-concurrency" type="number" min="1" value="' + escapeHtml(state.runForm.concurrency) + '" /></label>' + error('concurrency') +
+          '<label>Interval ms<input id="run-form-interval" type="number" min="0" value="' + escapeHtml(state.runForm.intervalMs) + '" /></label>' + error('intervalMs') +
           '<label style="text-transform:none;letter-spacing:0;font-size:13px;"><input id="run-form-sidecar" type="checkbox"' + (state.runForm.referenceSidecar ? ' checked' : '') + ' /> Use sidecar reference txt</label>' +
+          (state.runFormErrors.providerIds ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(state.runFormErrors.providerIds) + '</div>' : '') +
           '<div style="display:grid;gap:6px;"><div class="muted" style="font-size:12px;">Providers</div>' + providerCheckboxes + '</div>' +
-          '<button id="run-form-submit" style="margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--accent);color:white;cursor:pointer;">' +
-            (state.isSubmittingRun ? 'Running...' : 'Start Run') +
+          '<button id="run-form-submit" style="margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--accent);color:white;cursor:' + (state.isSubmittingRun ? 'wait' : 'pointer') + ';"' + (state.isSubmittingRun ? ' disabled' : '') + '>' +
+            (state.isSubmittingRun ? 'Submitting...' : 'Queue Run') +
           '</button>';
 
         ['run-form-mode', 'run-form-input', 'run-form-manifest', 'run-form-reference-dir', 'run-form-rounds', 'run-form-duration', 'run-form-concurrency', 'run-form-interval', 'run-form-sidecar']
@@ -619,7 +865,47 @@ function renderIndexHtml(): string {
         }
       }
 
-      async function loadRuns() {
+      function renderJobList() {
+        const root = document.getElementById('job-list');
+        if (!root) return;
+        if (!state.jobs.length) {
+          root.innerHTML = '<div class="muted">No queued or recent jobs yet.</div>';
+          return;
+        }
+
+        root.innerHTML = state.jobs.map((job) => {
+          const statusTag =
+            job.status === 'succeeded'
+              ? '<span class="tag">done</span>'
+              : job.status === 'failed'
+                ? '<span class="tag alert">failed</span>'
+                : '<span class="tag">' + escapeHtml(job.status) + '</span>';
+          const runLink = job.summary?.run_id
+            ? '<button class="job-open-run" data-run-id="' + escapeHtml(job.summary.run_id) + '" style="margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Open run</button>'
+            : '';
+          const errorMessage = job.error?.message
+            ? '<p class="muted" style="margin:8px 0 0;color:#b94a32;">' + escapeHtml(job.error.message) + '</p>'
+            : '';
+          return '<div class="run-card">' +
+            statusTag +
+            '<div class="tag">' + escapeHtml(job.request.mode) + '</div>' +
+            '<h3 style="margin-top:10px;font-size:15px;">' + escapeHtml(job.job_id) + '</h3>' +
+            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(job.request.providerIds.join(', ')) + '</p>' +
+            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(job.request.inputPath) + '</p>' +
+            errorMessage +
+            runLink +
+          '</div>';
+        }).join('');
+
+        root.querySelectorAll('.job-open-run').forEach((node) => {
+          node.addEventListener('click', async () => {
+            const runId = node.getAttribute('data-run-id');
+            await loadRuns(runId);
+          });
+        });
+      }
+
+      async function loadRuns(preferredRunId) {
         const params = new URLSearchParams();
         if (state.runFilters.provider !== 'all') params.set('provider', state.runFilters.provider);
         if (state.runFilters.mode !== 'all') params.set('mode', state.runFilters.mode);
@@ -630,7 +916,12 @@ function renderIndexHtml(): string {
         const data = await response.json();
         state.runs = data.runs || [];
         renderRunSidebarControls();
-        state.activeRunId = state.runs[0] ? state.runs[0].run_id : null;
+        const requestedRunId = preferredRunId || state.activeRunId;
+        const nextRun =
+          state.runs.find((run) => run.run_id === requestedRunId) ||
+          state.runs[0] ||
+          null;
+        state.activeRunId = nextRun ? nextRun.run_id : null;
         renderRunList();
         if (state.activeRunId) {
           await loadRun(state.activeRunId);
@@ -647,6 +938,31 @@ function renderIndexHtml(): string {
           state.runForm.providerIds = [state.providers[0].provider_id];
         }
         renderRunSidebarControls();
+      }
+
+      async function loadJobs() {
+        const response = await fetch('/api/jobs?limit=8');
+        const data = await response.json();
+        state.jobs = data.jobs || [];
+        renderJobList();
+
+        let preferredRunId = null;
+        state.jobs.forEach((job) => {
+          if (job.status === 'succeeded' && job.summary?.run_id && !state.seenCompletedJobs[job.job_id]) {
+            state.seenCompletedJobs[job.job_id] = true;
+            preferredRunId = preferredRunId || job.summary.run_id;
+          }
+          if ((job.status === 'failed' || job.status === 'succeeded') && !state.seenCompletedJobs[job.job_id]) {
+            state.seenCompletedJobs[job.job_id] = true;
+          }
+        });
+
+        if (preferredRunId) {
+          state.runFormMessage = 'Background job finished. Loaded the new run.';
+          await loadRuns(preferredRunId);
+        }
+
+        scheduleJobPolling();
       }
 
       async function loadRun(runId) {
@@ -851,16 +1167,66 @@ function renderIndexHtml(): string {
         state.runForm.providerIds = Array.from(document.querySelectorAll('.run-provider-checkbox'))
           .filter((node) => node.checked)
           .map((node) => node.value);
+        state.runFormErrors = {};
+        state.runFormMessage = '';
+      }
+
+      function validateRunForm() {
+        const errors = {};
+        if (!state.runForm.inputPath) errors.inputPath = 'Input path is required.';
+        if (!state.runForm.providerIds.length) errors.providerIds = 'Select at least one provider.';
+
+        const rounds = Number.parseInt(state.runForm.rounds || '1', 10);
+        const durationMs = Number.parseInt(state.runForm.durationMs || '30000', 10);
+        const concurrency = Number.parseInt(state.runForm.concurrency || '1', 10);
+        const intervalMs = Number.parseInt(state.runForm.intervalMs || '0', 10);
+
+        if (state.runForm.mode === 'once' && (!Number.isFinite(rounds) || rounds < 1)) {
+          errors.rounds = 'Rounds must be >= 1.';
+        }
+        if (state.runForm.mode === 'duration' && (!Number.isFinite(durationMs) || durationMs < 1)) {
+          errors.durationMs = 'Duration must be >= 1 ms.';
+        }
+        if (!Number.isFinite(concurrency) || concurrency < 1) {
+          errors.concurrency = 'Concurrency must be >= 1.';
+        }
+        if (!Number.isFinite(intervalMs) || intervalMs < 0) {
+          errors.intervalMs = 'Interval must be >= 0.';
+        }
+
+        return errors;
+      }
+
+      function hasActiveJobs() {
+        return state.jobs.some((job) => job.status === 'queued' || job.status === 'running');
+      }
+
+      function scheduleJobPolling() {
+        if (window.__asrBenchJobPollTimer) {
+          clearTimeout(window.__asrBenchJobPollTimer);
+          window.__asrBenchJobPollTimer = null;
+        }
+        if (hasActiveJobs()) {
+          window.__asrBenchJobPollTimer = setTimeout(() => {
+            loadJobs().catch((error) => {
+              state.runFormMessage = error && error.message ? error.message : String(error);
+              renderRunSidebarControls();
+            });
+          }, 1500);
+        }
       }
 
       async function submitRunForm() {
         updateRunFormFromDom();
-        if (!state.runForm.inputPath || !state.runForm.providerIds.length) {
-          alert('Input path and at least one provider are required.');
+        const localErrors = validateRunForm();
+        if (Object.keys(localErrors).length > 0) {
+          state.runFormErrors = localErrors;
+          renderRunCreateControls();
           return;
         }
 
         state.isSubmittingRun = true;
+        state.runFormMessage = '';
         renderRunCreateControls();
         try {
           const payload = {
@@ -884,15 +1250,20 @@ function renderIndexHtml(): string {
             body: JSON.stringify(payload),
           });
           const data = await response.json();
+          if (response.status === 400) {
+            state.runFormErrors = data && data.field_errors ? data.field_errors : {};
+            state.runFormMessage = data && data.message ? data.message : 'Please fix the highlighted fields.';
+            renderRunCreateControls();
+            return;
+          }
           if (!response.ok) {
-            throw new Error(data && data.error ? data.error : 'Run creation failed');
+            throw new Error(data && data.message ? data.message : 'Run creation failed');
           }
-          await loadRuns();
-          if (data.summary && data.summary.run_id) {
-            await loadRun(data.summary.run_id);
-          }
+          state.runFormErrors = {};
+          state.runFormMessage = 'Run queued in the background. The jobs panel will update automatically.';
+          await loadJobs();
         } catch (error) {
-          alert(error && error.message ? error.message : String(error));
+          state.runFormMessage = error && error.message ? error.message : String(error);
         } finally {
           state.isSubmittingRun = false;
           renderRunCreateControls();
@@ -925,6 +1296,9 @@ function renderIndexHtml(): string {
             row.provider_id,
             row.audio_id,
             row.audio_path,
+            row.audio_language,
+            row.audio_speaker,
+            (row.audio_tags || []).join(' '),
             row.error?.type,
             row.normalized_result?.text,
             row.evaluation?.reference_text,
@@ -961,9 +1335,10 @@ function renderIndexHtml(): string {
           rows.map((row) => {
             const active = selectedAttempt && row.attempt_id === selectedAttempt.attempt_id ? ' active' : '';
             const text = row.normalized_result?.text || '';
+            const audioMeta = [row.audio_language, row.audio_speaker, (row.audio_tags || []).join(', ')].filter(Boolean).join(' · ');
             return '<tr class="attempt-row' + active + '" data-attempt-id="' + row.attempt_id + '">' +
               '<td>' + escapeHtml(row.provider_id) + '</td>' +
-              '<td>' + escapeHtml(row.audio_id) + '</td>' +
+              '<td><div>' + escapeHtml(row.audio_id) + '</div>' + (audioMeta ? '<div class="muted" style="margin-top:4px;font-size:11px;">' + escapeHtml(audioMeta) + '</div>' : '') + '</td>' +
               '<td>' + fmt(row.latency_ms) + '</td>' +
               '<td>' + fmt(row.retry_count) + '</td>' +
               '<td>' + (row.success ? '<span class="tag">ok</span>' : '<span class="tag alert">' + escapeHtml(fmt(row.error?.type)) + '</span>') + '</td>' +
@@ -1007,6 +1382,10 @@ function renderIndexHtml(): string {
           provider_id: row.provider_id,
           audio_id: row.audio_id,
           audio_path: row.audio_path,
+          audio_language: row.audio_language,
+          audio_speaker: row.audio_speaker,
+          audio_tags: row.audio_tags,
+          audio_reference_path: row.audio_reference_path,
           latency_ms: row.latency_ms,
           retry_count: row.retry_count,
           request_attempts: row.request_attempts,
@@ -1123,7 +1502,7 @@ function renderIndexHtml(): string {
         }
       }
 
-      Promise.all([loadProviders(), loadRuns()]).catch((error) => {
+      Promise.all([loadProviders(), loadJobs(), loadRuns()]).catch((error) => {
         document.getElementById('content').innerHTML = '<section class="panel empty">Failed to load runs: ' + escapeHtml(error.message || String(error)) + '</section>';
       });
     </script>

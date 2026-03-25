@@ -19,7 +19,7 @@ Current implementation includes:
 - dataset manifest loading from `dataset.manifest.json`, `manifest.json`, or `--manifest`
 - sidecar or external reference transcript loading
 - WER / CER scoring
-- minimal local web dashboard over SQLite, with run filters, web run creation, attempt filters, and transcript diff
+- minimal local web dashboard over SQLite, with run filters, validated web run creation, background jobs, attempt filters, transcript diff, and manifest metadata display
 
 ## Install
 
@@ -142,11 +142,14 @@ npm run cli -- --db artifacts/asrbench.sqlite ui:serve --port 3000
 The dashboard now supports:
 - run filtering by provider / mode / failures / search text
 - starting `run:once` or `run:duration` jobs from the browser
+- non-blocking background job polling for browser-triggered runs
+- inline form validation and structured field errors
 - provider / status / text filters
 - min latency / min WER thresholds
 - sorting by latency / WER / retries / recency
 - built-in latency / WER / failure bar charts
 - failure diagnostics on the selected attempt
+- manifest metadata (`language`, `speaker`, `tags`) in attempt views
 - raw attempt artifact inspection
 - side-by-side reference vs hypothesis diff chips
 
@@ -218,6 +221,24 @@ Notes:
 - manifest metadata is applied before sidecar / `--reference-dir`, so those sources can still fill missing references
 - `reference_path` is resolved relative to the manifest file location
 
+## Demo assets
+
+For a quick smoke test, the repo includes:
+- `/Users/hc/working/github/audioApibench/examples/demo-dataset`
+- `/Users/hc/working/github/audioApibench/examples/demo-provider`
+
+Example:
+
+```bash
+OPENAI_API_KEY=... npm run cli -- \
+  --config examples/demo-provider \
+  --manifest examples/demo-dataset/dataset.manifest.json \
+  --reference-sidecar \
+  run:once \
+  --providers openai-whisper-demo \
+  --input examples/demo-dataset
+```
+
 ## Metrics
 
 Per attempt:
@@ -242,4 +263,4 @@ Per run and per provider:
 - provider-level `runner_options` override CLI defaults during `run:duration`
 - retry policy uses exponential backoff from `retry_policy.backoff_ms`
 - ZenMux is modeled as an independent provider type, not only as a generic OpenAI-compatible endpoint
-- the local UI uses `GET /api/providers`, `GET /api/runs`, `GET /api/runs/:run_id`, `GET /api/runs/:run_id/attempts/:attempt_id/raw`, and `POST /api/run`
+- the local UI uses `GET /api/providers`, `GET /api/jobs`, `GET /api/runs`, `GET /api/runs/:run_id`, `GET /api/runs/:run_id/attempts/:attempt_id/raw`, and `POST /api/run`

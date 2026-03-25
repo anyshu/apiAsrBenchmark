@@ -169,6 +169,10 @@ export function toCsv(attempts: BenchAttemptRecord[]): string {
     'audio_id',
     'audio_path',
     'audio_duration_ms',
+    'audio_language',
+    'audio_speaker',
+    'audio_tags',
+    'audio_reference_path',
     'round_index',
     'started_at',
     'finished_at',
@@ -192,6 +196,10 @@ export function toCsv(attempts: BenchAttemptRecord[]): string {
     attempt.audio_id,
     attempt.audio_path,
     attempt.audio_duration_ms ? String(attempt.audio_duration_ms) : '',
+    attempt.audio_language ?? '',
+    attempt.audio_speaker ?? '',
+    attempt.audio_tags?.join('|') ?? '',
+    attempt.audio_reference_path ?? '',
     String(attempt.round_index),
     attempt.started_at,
     attempt.finished_at,
@@ -257,6 +265,10 @@ export function createAttemptRecord(params: {
   audioId: string;
   audioPath: string;
   audioDurationMs?: number;
+  audioLanguage?: string;
+  audioSpeaker?: string;
+  audioTags?: string[];
+  audioReferencePath?: string;
   roundIndex: number;
   startedAt: string;
   finishedAt: string;
@@ -276,6 +288,10 @@ export function createAttemptRecord(params: {
     audio_id: params.audioId,
     audio_path: params.audioPath,
     audio_duration_ms: params.audioDurationMs,
+    audio_language: params.audioLanguage,
+    audio_speaker: params.audioSpeaker,
+    audio_tags: params.audioTags,
+    audio_reference_path: params.audioReferencePath,
     round_index: params.roundIndex,
     started_at: params.startedAt,
     finished_at: params.finishedAt,

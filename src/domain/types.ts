@@ -111,6 +111,10 @@ export interface BenchAttemptRecord {
   audio_id: string;
   audio_path: string;
   audio_duration_ms?: number;
+  audio_language?: string;
+  audio_speaker?: string;
+  audio_tags?: string[];
+  audio_reference_path?: string;
   round_index: number;
   started_at: string;
   finished_at: string;

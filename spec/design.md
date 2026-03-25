@@ -85,16 +85,19 @@ SQLite 的作用：
 - 供 UI / API 查看 run 详情与 attempt 明细
 - 避免每次都遍历 artifact 目录再拼装数据
 - 支持按 provider / mode / failure / 时间范围做历史 run 查询
+- 保留 attempt 级别音频 metadata，便于 UI 直接显示 `language`、`speaker`、`tags`
 
 ### UI Server
 - 使用 Node 内置 `http` 提供本地 dashboard
 - `GET /api/providers`
+- `GET /api/jobs`
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
 - `GET /api/runs/:run_id/attempts/:attempt_id/raw`
 - `POST /api/run`
 - `/` 返回静态 HTML + JS 页面
-- 页面支持 run 过滤、浏览器内创建 run、attempt 筛选、失败诊断、reference/hypothesis diff
+- `POST /api/run` 只负责排队并返回 job id，实际 benchmark 在后台执行
+- 页面支持 run 过滤、浏览器内创建 run、background job 轮询、attempt 筛选、失败诊断、reference/hypothesis diff
 - 页面基于当前 run 数据做轻量级条形图，不依赖前端图表库
 
 ## 4. 运行流程
@@ -153,7 +156,8 @@ SQLite 的作用：
 - SQLite 存储
 - WER / CER
 - dataset manifest enrich
-- Web UI run filters / create-run form
+- Web UI run filters / create-run form / background jobs
+- demo dataset / demo provider assets
 
 后续可继续扩展：
 - SQLite 查询统计 API

@@ -20,6 +20,7 @@
 ### 左侧 Sidebar
 - run filters（provider / mode / failures / query）
 - create run form（mode、provider、多种 reference / manifest 参数）
+- background jobs（queued / running / succeeded / failed）
 - run 列表
 - 展示 run id、模式、attempt 数、平均延迟、平均 WER
 
@@ -42,6 +43,7 @@
 
 当前 UI 不直接读取 `artifacts/runs/*` 文件，而是走本地 HTTP API：
 - `GET /api/providers`
+- `GET /api/jobs`
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
 - `GET /api/runs/:run_id/attempts/:attempt_id/raw`
@@ -57,14 +59,17 @@
 ## 6. 最小交互
 
 1. 打开 `/`
-2. 自动请求 `/api/providers` 和 `/api/runs`
+2. 自动请求 `/api/providers`、`/api/jobs` 和 `/api/runs`
 3. 可在左侧先按 run 维度过滤历史 benchmark
 4. 可直接在浏览器内填写 create-run 表单发起 `run:once` / `run:duration`
-5. 默认加载最新一个 run
-6. 点击左侧 run 卡片切换详情
-7. 在 attempt 面板按 provider / status / WER / latency 过滤
-8. 点击某个 attempt 查看 failure diagnostics 和 transcript diff
-9. 通过图表快速判断延迟分布、质量分布和失败类型
+5. 表单错误以内联字段提示返回，而不是只弹通用错误
+6. run 进入后台 job 队列，页面轮询 job 状态
+7. job 成功后自动刷新 run 列表并打开最新 run
+8. 默认加载最新一个 run
+9. 点击左侧 run 卡片切换详情
+10. 在 attempt 面板按 provider / status / WER / latency 过滤
+11. 点击某个 attempt 查看 failure diagnostics、manifest metadata 和 transcript diff
+12. 通过图表快速判断延迟分布、质量分布和失败类型
 
 ## 7. 后续演进方向
 

@@ -72,6 +72,7 @@
 - `CSV` 用于导出汇总结果
 - `raw/` 保存原始响应与调试信息
 - `SQLite` 保存 run / attempt 元信息，供后续 UI 和 API 查询
+- attempt 元信息应保留数据集 metadata，如 `language`、`speaker`、`tags`
 
 ### FR-9 Provider 验证
 - 配置校验
@@ -86,7 +87,9 @@
 - CLI 全局支持 `--manifest`
 - SQLite run 查询支持按 provider、mode、失败情况、时间范围过滤
 - 本地 Web UI 从 SQLite 读取 runs / attempts，不直接读取 provider-specific 逻辑
-- Web UI 支持 run 列表过滤、浏览器内创建 run、失败 attempt 筛选、关键指标过滤、transcript diff 查看
+- Web UI 支持 run 列表过滤、浏览器内创建 run、后台 job 轮询、失败 attempt 筛选、关键指标过滤、transcript diff 查看
+- Web UI 创建 run 时应返回结构化字段校验错误，避免只有通用报错
+- Web UI attempt 详情应展示 manifest metadata
 - 将来替换成其他 UI 形态时，不应修改 benchmark 内核
 
 ## 5. 非功能需求
@@ -113,4 +116,5 @@
 - dataset manifest metadata / reference enrichment
 - sidecar / reference-dir transcript
 - WER / CER
-- 最小本地 Web UI + run filters + web run creation
+- 最小本地 Web UI + run filters + async web run creation
+- demo dataset + demo provider config
