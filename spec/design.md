@@ -82,6 +82,7 @@ SQLite 的作用：
 - 供 UI 快速查询 runs 列表
 - 供 UI / API 查看 run 详情与 attempt 明细
 - 避免每次都遍历 artifact 目录再拼装数据
+- 支持按 provider / mode / failure / 时间范围做历史 run 查询
 
 ### UI Server
 - 使用 Node 内置 `http` 提供本地 dashboard

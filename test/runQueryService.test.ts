@@ -91,6 +91,22 @@ test('run query service lists, shows, and exports SQLite runs', async () => {
     const runs = await listRuns({ dbPath, limit: 10 });
     assert.equal(runs[0]?.run_id, summary.run_id);
 
+    const filteredByProvider = await listRuns({
+      dbPath,
+      providerId: 'openai-whisper',
+      limit: 10,
+    });
+    assert.equal(filteredByProvider.length, 1);
+
+    const filteredByMode = await listRuns({
+      dbPath,
+      mode: 'once',
+      hasFailures: false,
+      query: 'audio',
+      limit: 10,
+    });
+    assert.equal(filteredByMode[0]?.run_id, summary.run_id);
+
     const shown = await showRun({ dbPath, runId: summary.run_id, includeAttempts: true });
     assert.equal(shown.summary.run_id, summary.run_id);
     assert.equal(shown.attempts.length, 1);

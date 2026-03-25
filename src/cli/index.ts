@@ -109,15 +109,38 @@ program
   .command('run:list')
   .description('List benchmark runs stored in SQLite')
   .option('--limit <n>', 'max number of runs to return', '20')
-  .action(async (options: { limit: string }) => {
+  .option('--provider <id>', 'filter runs that include this provider id')
+  .option('--mode <mode>', 'filter by run mode: once or duration')
+  .option('--failures <kind>', 'filter by failure presence: yes or no')
+  .option('--created-after <iso>', 'only include runs created at or after this ISO timestamp')
+  .option('--created-before <iso>', 'only include runs created at or before this ISO timestamp')
+  .option('--query <text>', 'filter by run id or input path substring')
+  .action(
+    async (options: {
+      limit: string;
+      provider?: string;
+      mode?: 'once' | 'duration';
+      failures?: string;
+      createdAfter?: string;
+      createdBefore?: string;
+      query?: string;
+    }) => {
     const globalOptions = program.opts<{ db: string }>();
     const { listRuns } = await import('../services/runQueryService.js');
     const runs = await listRuns({
       dbPath: globalOptions.db,
       limit: Number.parseInt(options.limit, 10),
+      providerId: options.provider,
+      mode: options.mode,
+      hasFailures:
+        options.failures === undefined ? undefined : ['yes', 'true', '1'].includes(options.failures.toLowerCase()),
+      createdAfter: options.createdAfter,
+      createdBefore: options.createdBefore,
+      query: options.query,
     });
     console.log(JSON.stringify({ runs }, null, 2));
-  });
+    },
+  );
 
 program
   .command('run:show')

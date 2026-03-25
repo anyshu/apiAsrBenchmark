@@ -143,6 +143,17 @@ List recent runs from SQLite:
 npm run cli -- --db artifacts/asrbench.sqlite run:list --limit 10
 ```
 
+Filter runs by provider / mode / failures / time:
+
+```bash
+npm run cli -- --db artifacts/asrbench.sqlite run:list \
+  --provider openai-whisper \
+  --mode once \
+  --failures no \
+  --created-after 2026-03-25T00:00:00Z \
+  --query samples
+```
+
 Show one run summary:
 
 ```bash

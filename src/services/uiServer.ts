@@ -33,7 +33,9 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
 
     if (requestUrl.pathname === '/api/runs') {
       const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '50', 10);
-      const runs = await listRunsFromSqlite(options.dbPath, Number.isFinite(limit) ? limit : 50);
+      const runs = await listRunsFromSqlite(options.dbPath, {
+        limit: Number.isFinite(limit) ? limit : 50,
+      });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ runs }, null, 2));
       return;

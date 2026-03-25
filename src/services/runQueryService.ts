@@ -3,10 +3,18 @@ import path from 'node:path';
 import type { BenchAttemptRecord } from '../domain/types.js';
 import { toCsv } from './benchmarkArtifacts.js';
 import { getRunDetailFromSqlite, listRunsFromSqlite } from './sqliteStore.js';
-import type { StoredRunDetail } from './sqliteStore.js';
+import type { ListRunsQuery, StoredRunDetail } from './sqliteStore.js';
 
-export async function listRuns(options: { dbPath: string; limit?: number }) {
-  return listRunsFromSqlite(options.dbPath, options.limit ?? 20);
+export async function listRuns(options: { dbPath: string } & ListRunsQuery) {
+  return listRunsFromSqlite(options.dbPath, {
+    limit: options.limit ?? 20,
+    providerId: options.providerId,
+    mode: options.mode,
+    hasFailures: options.hasFailures,
+    createdAfter: options.createdAfter,
+    createdBefore: options.createdBefore,
+    query: options.query,
+  });
 }
 
 export async function showRun(options: {

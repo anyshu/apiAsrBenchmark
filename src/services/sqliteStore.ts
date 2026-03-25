@@ -8,6 +8,16 @@ export interface StoredRunDetail {
   attempts: BenchAttemptRecord[];
 }
 
+export interface ListRunsQuery {
+  limit?: number;
+  providerId?: string;
+  mode?: BenchRunSummary['mode'];
+  hasFailures?: boolean;
+  createdAfter?: string;
+  createdBefore?: string;
+  query?: string;
+}
+
 export async function persistRunToSqlite(params: {
   dbPath: string;
   summary: BenchRunSummary;
@@ -110,12 +120,43 @@ export async function persistRunToSqlite(params: {
   }
 }
 
-export async function listRunsFromSqlite(dbPath: string, limit = 50): Promise<BenchRunSummary[]> {
-  const rows = withDatabase(dbPath, (db) =>
-    db
-      .prepare('SELECT summary_json FROM runs ORDER BY created_at DESC LIMIT ?')
-      .all(limit) as Array<{ summary_json: string }>,
-  );
+export async function listRunsFromSqlite(dbPath: string, query: ListRunsQuery = {}): Promise<BenchRunSummary[]> {
+  const rows = withDatabase(dbPath, (db) => {
+    const conditions: string[] = [];
+    const values: Array<string | number> = [];
+
+    if (query.providerId) {
+      conditions.push('provider_ids_json LIKE ?');
+      values.push(`%"${query.providerId}"%`);
+    }
+    if (query.mode) {
+      conditions.push('mode = ?');
+      values.push(query.mode);
+    }
+    if (query.hasFailures !== undefined) {
+      conditions.push(query.hasFailures ? 'failure_count > 0' : 'failure_count = 0');
+    }
+    if (query.createdAfter) {
+      conditions.push('created_at >= ?');
+      values.push(query.createdAfter);
+    }
+    if (query.createdBefore) {
+      conditions.push('created_at <= ?');
+      values.push(query.createdBefore);
+    }
+    if (query.query) {
+      conditions.push('(run_id LIKE ? OR input_path LIKE ?)');
+      values.push(`%${query.query}%`, `%${query.query}%`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = Math.max(1, query.limit ?? 50);
+    const statement = db.prepare(
+      `SELECT summary_json FROM runs ${whereClause} ORDER BY created_at DESC LIMIT ?`,
+    );
+
+    return statement.all(...values, limit) as Array<{ summary_json: string }>;
+  });
 
   return rows.map((row) => JSON.parse(row.summary_json) as BenchRunSummary);
 }
