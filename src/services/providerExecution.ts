@@ -5,9 +5,19 @@ import type {
   ProviderRequestInput,
 } from '../domain/types.js';
 
+export class ExecutionCancelledError extends Error {
+  constructor(message = 'execution cancelled') {
+    super(message);
+    this.name = 'ExecutionCancelledError';
+  }
+}
+
 export async function executeWithRetry(
   adapter: AsrProviderAdapter,
   input: ProviderRequestInput,
+  options: {
+    shouldStop?: () => boolean;
+  } = {},
 ): Promise<ProviderExecutionEnvelope> {
   const maxAttempts = Math.max(1, input.provider.retry_policy?.maxAttempts ?? 1);
   const backoffMs = Math.max(0, input.provider.retry_policy?.backoffMs ?? 0);
@@ -15,6 +25,10 @@ export async function executeWithRetry(
   let attempt = 0;
 
   while (attempt < maxAttempts) {
+    if (options.shouldStop?.()) {
+      throw new ExecutionCancelledError();
+    }
+
     attempt += 1;
     const result = await adapter.execute(input);
 
@@ -35,7 +49,7 @@ export async function executeWithRetry(
       finishedAt: result.finishedAt,
     });
 
-    await sleep(computeBackoff(backoffMs, attempt));
+    await sleep(computeBackoff(backoffMs, attempt), options.shouldStop);
   }
 
   throw new Error('executeWithRetry reached an unreachable state');
@@ -56,9 +70,18 @@ function computeBackoff(baseBackoffMs: number, attempt: number): number {
   return baseBackoffMs * 2 ** Math.max(0, attempt - 1);
 }
 
-async function sleep(ms: number): Promise<void> {
+async function sleep(ms: number, shouldStop?: () => boolean): Promise<void> {
   if (ms <= 0) {
     return;
   }
-  await new Promise((resolve) => setTimeout(resolve, ms));
+
+  const sliceMs = Math.min(200, ms);
+  let remainingMs = ms;
+  while (remainingMs > 0) {
+    if (shouldStop?.()) {
+      throw new ExecutionCancelledError();
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(sliceMs, remainingMs)));
+    remainingMs -= sliceMs;
+  }
 }

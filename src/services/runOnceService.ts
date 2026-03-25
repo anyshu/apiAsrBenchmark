@@ -7,7 +7,7 @@ import { DefaultProviderSwitcher } from '../providers/switcher.js';
 import { collectAudioAssets } from '../utils/audio.js';
 import { createAttemptRecord, finalizeRunArtifacts, writeRawAttemptArtifact } from './benchmarkArtifacts.js';
 import { applyDatasetManifest } from './datasetManifest.js';
-import { executeWithRetry } from './providerExecution.js';
+import { executeWithRetry, ExecutionCancelledError } from './providerExecution.js';
 import { attachReferenceTexts, evaluateTranscript } from './references.js';
 
 export interface RunOnceOptions {
@@ -20,6 +20,12 @@ export interface RunOnceOptions {
   manifestPath?: string;
   referenceSidecar?: boolean;
   referenceDir?: string;
+  shouldStop?: () => boolean;
+  onAttemptComplete?: (context: {
+    attempt: BenchAttemptRecord;
+    completedAttempts: number;
+    totalAttempts: number;
+  }) => void;
 }
 
 export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary> {
@@ -58,6 +64,7 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
   await fs.mkdir(rawDir, { recursive: true });
 
   const attempts: BenchAttemptRecord[] = [];
+  const totalAttempts = providers.length * rounds * audioAssets.length;
 
   for (const provider of providers) {
     const adapter = switcher.resolve(provider);
@@ -65,7 +72,39 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
 
     for (let roundIndex = 1; roundIndex <= rounds; roundIndex += 1) {
       for (const audio of audioAssets) {
-        const execution = await executeWithRetry(adapter, { provider, audio });
+        if (options.shouldStop?.()) {
+          return finalizeRunArtifacts({
+            runId,
+            mode: 'once',
+            createdAt,
+            providerIds: providers.map((item) => item.provider_id),
+            inputPath: path.resolve(options.inputPath),
+            rounds,
+            attempts,
+            runDir,
+            dbPath: options.dbPath,
+          });
+        }
+
+        let execution;
+        try {
+          execution = await executeWithRetry(adapter, { provider, audio }, { shouldStop: options.shouldStop });
+        } catch (error) {
+          if (error instanceof ExecutionCancelledError) {
+            return finalizeRunArtifacts({
+              runId,
+              mode: 'once',
+              createdAt,
+              providerIds: providers.map((item) => item.provider_id),
+              inputPath: path.resolve(options.inputPath),
+              rounds,
+              attempts,
+              runDir,
+              dbPath: options.dbPath,
+            });
+          }
+          throw error;
+        }
         const executionResult = execution.result;
         const latencyMs =
           new Date(executionResult.finishedAt).getTime() - new Date(executionResult.startedAt).getTime();
@@ -117,6 +156,11 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
         });
 
         attempts.push(attempt);
+        options.onAttemptComplete?.({
+          attempt,
+          completedAttempts: attempts.length,
+          totalAttempts,
+        });
       }
     }
   }

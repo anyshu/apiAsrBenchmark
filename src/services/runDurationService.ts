@@ -9,6 +9,7 @@ import { createAttemptRecord, finalizeRunArtifacts, writeRawAttemptArtifact } fr
 import { applyDatasetManifest } from './datasetManifest.js';
 import {
   executeWithRetry,
+  ExecutionCancelledError,
   resolveProviderConcurrency,
   resolveProviderIntervalMs,
 } from './providerExecution.js';
@@ -26,6 +27,13 @@ export interface RunDurationOptions {
   manifestPath?: string;
   referenceSidecar?: boolean;
   referenceDir?: string;
+  shouldStop?: () => boolean;
+  onAttemptComplete?: (context: {
+    attempt: BenchAttemptRecord;
+    completedAttempts: number;
+    elapsedMs: number;
+    durationMs: number;
+  }) => void;
 }
 
 interface ProviderTaskState {
@@ -87,14 +95,22 @@ export async function runDuration(options: RunDurationOptions): Promise<BenchRun
     const adapter = switcher.resolve(state.provider);
     const intervalMs = resolveProviderIntervalMs(state.provider, options.intervalMs);
 
-    while (Date.now() < deadlineMs) {
+    while (Date.now() < deadlineMs && !options.shouldStop?.()) {
       const audio = nextAudio(state);
       if (!audio) {
         return;
       }
 
       const roundIndex = nextRoundIndex(state, audio);
-      const execution = await executeWithRetry(adapter, { provider: state.provider, audio });
+      let execution;
+      try {
+        execution = await executeWithRetry(adapter, { provider: state.provider, audio }, { shouldStop: options.shouldStop });
+      } catch (error) {
+        if (error instanceof ExecutionCancelledError) {
+          return;
+        }
+        throw error;
+      }
       const executionResult = execution.result;
       const latencyMs =
         new Date(executionResult.finishedAt).getTime() - new Date(executionResult.startedAt).getTime();
@@ -121,34 +137,39 @@ export async function runDuration(options: RunDurationOptions): Promise<BenchRun
         }
       }
 
-      attempts.push(
-        createAttemptRecord({
-          attemptId,
-          runId,
-          providerId: state.provider.provider_id,
-          audioId: audio.audio_id,
-          audioPath: audio.path,
-          audioDurationMs: audio.duration_ms,
-          audioLanguage: audio.language,
-          audioSpeaker: audio.speaker,
-          audioTags: audio.tags,
-          audioReferencePath: audio.reference_path,
-          roundIndex,
-          startedAt: executionResult.startedAt,
-          finishedAt: executionResult.finishedAt,
-          latencyMs,
-          success: executionResult.ok,
-          requestAttempts: execution.requestAttempts,
-          retryCount: execution.retryCount,
-          httpStatus: executionResult.statusCode,
-          error: executionResult.error,
-          normalizedText: normalizedResult,
-          evaluation,
-        }),
-      );
+      const attempt = createAttemptRecord({
+        attemptId,
+        runId,
+        providerId: state.provider.provider_id,
+        audioId: audio.audio_id,
+        audioPath: audio.path,
+        audioDurationMs: audio.duration_ms,
+        audioLanguage: audio.language,
+        audioSpeaker: audio.speaker,
+        audioTags: audio.tags,
+        audioReferencePath: audio.reference_path,
+        roundIndex,
+        startedAt: executionResult.startedAt,
+        finishedAt: executionResult.finishedAt,
+        latencyMs,
+        success: executionResult.ok,
+        requestAttempts: execution.requestAttempts,
+        retryCount: execution.retryCount,
+        httpStatus: executionResult.statusCode,
+        error: executionResult.error,
+        normalizedText: normalizedResult,
+        evaluation,
+      });
+      attempts.push(attempt);
+      options.onAttemptComplete?.({
+        attempt,
+        completedAttempts: attempts.length,
+        elapsedMs: Math.max(0, Date.now() - startedAtMs),
+        durationMs: options.durationMs,
+      });
 
-      if (intervalMs > 0 && Date.now() < deadlineMs) {
-        await sleep(intervalMs);
+      if (intervalMs > 0 && Date.now() < deadlineMs && !options.shouldStop?.()) {
+        await sleep(intervalMs, options.shouldStop);
       }
     }
   }
@@ -194,9 +215,18 @@ function nextRoundIndex(state: ProviderTaskState, audio: AudioAsset): number {
   return roundIndex;
 }
 
-async function sleep(ms: number): Promise<void> {
+async function sleep(ms: number, shouldStop?: () => boolean): Promise<void> {
   if (ms <= 0) {
     return;
   }
-  await new Promise((resolve) => setTimeout(resolve, ms));
+  const sliceMs = Math.min(200, ms);
+  let remainingMs = ms;
+  while (remainingMs > 0) {
+    if (shouldStop?.()) {
+      return;
+    }
+    const waitMs = Math.min(sliceMs, remainingMs);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    remainingMs -= waitMs;
+  }
 }

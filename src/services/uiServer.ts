@@ -58,10 +58,23 @@ interface RunValidationResult {
 
 export interface UiRunJob {
   job_id: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   created_at: string;
   started_at?: string;
   finished_at?: string;
+  cancel_requested?: boolean;
+  cancelled_at?: string;
+  progress?: {
+    completed_attempts: number;
+    total_attempts?: number;
+    progress_ratio?: number;
+    elapsed_ms?: number;
+    duration_ms?: number;
+    current_attempt_id?: string;
+    current_provider_id?: string;
+    current_audio_id?: string;
+    message?: string;
+  };
   request: RunSubmission;
   summary?: BenchRunSummary;
   error?: {
@@ -111,6 +124,22 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
         return;
       }
 
+      if (requestUrl.pathname === '/api/demo-assets') {
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(
+          JSON.stringify(
+            {
+              demo_provider_config: path.resolve('examples/demo-provider'),
+              demo_manifest_path: path.resolve('examples/demo-dataset/dataset.manifest.json'),
+              demo_input_path: path.resolve('examples/demo-dataset'),
+            },
+            null,
+            2,
+          ),
+        );
+        return;
+      }
+
       if (requestUrl.pathname === '/api/jobs') {
         const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '10', 10);
         const jobs = listRunJobs(runJobs, Number.isFinite(limit) ? limit : 10);
@@ -128,6 +157,37 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
           return;
         }
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ job }, null, 2));
+        return;
+      }
+
+      const cancelMatch = requestUrl.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
+      if (request.method === 'POST' && cancelMatch) {
+        const job = runJobs.get(decodeURIComponent(cancelMatch[1]));
+        if (!job) {
+          response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: 'job_not_found' }));
+          return;
+        }
+        if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
+          response.writeHead(409, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: 'job_already_finished', job }, null, 2));
+          return;
+        }
+        job.cancel_requested = true;
+        job.progress = {
+          completed_attempts: job.progress?.completed_attempts ?? 0,
+          total_attempts: job.progress?.total_attempts,
+          progress_ratio: job.progress?.progress_ratio,
+          elapsed_ms: job.progress?.elapsed_ms,
+          duration_ms: job.progress?.duration_ms,
+          current_attempt_id: job.progress?.current_attempt_id,
+          current_provider_id: job.progress?.current_provider_id,
+          current_audio_id: job.progress?.current_audio_id,
+          message: 'Cancellation requested. Waiting for the current request boundary.',
+        };
+        runJobs.set(job.job_id, job);
+        response.writeHead(202, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ job }, null, 2));
         return;
       }
@@ -330,6 +390,16 @@ export async function executeRunJob(
 ): Promise<void> {
   job.status = 'running';
   job.started_at = new Date().toISOString();
+  job.progress = {
+    completed_attempts: 0,
+    progress_ratio: 0,
+    duration_ms: job.request.mode === 'duration' ? job.request.durationMs : undefined,
+    total_attempts:
+      job.request.mode === 'once'
+        ? undefined
+        : undefined,
+    message: 'Job started.',
+  };
   runJobs.set(job.job_id, job);
 
   try {
@@ -346,6 +416,20 @@ export async function executeRunJob(
             manifestPath: job.request.manifestPath,
             referenceSidecar: job.request.referenceSidecar,
             referenceDir: job.request.referenceDir,
+            shouldStop: () => Boolean(job.cancel_requested),
+            onAttemptComplete: ({ attempt, completedAttempts, elapsedMs, durationMs }) => {
+              job.progress = {
+                completed_attempts: completedAttempts,
+                elapsed_ms: elapsedMs,
+                duration_ms: durationMs,
+                progress_ratio: durationMs > 0 ? Math.min(1, elapsedMs / durationMs) : undefined,
+                current_attempt_id: attempt.attempt_id,
+                current_provider_id: attempt.provider_id,
+                current_audio_id: attempt.audio_id,
+                message: job.cancel_requested ? 'Cancelling after current attempt...' : 'Running duration benchmark.',
+              };
+              runJobs.set(job.job_id, job);
+            },
           })
         : await runOnce({
             configPath: options.configPath,
@@ -356,17 +440,58 @@ export async function executeRunJob(
             manifestPath: job.request.manifestPath,
             referenceSidecar: job.request.referenceSidecar,
             referenceDir: job.request.referenceDir,
+            shouldStop: () => Boolean(job.cancel_requested),
+            onAttemptComplete: ({ attempt, completedAttempts, totalAttempts }) => {
+              job.progress = {
+                completed_attempts: completedAttempts,
+                total_attempts: totalAttempts,
+                progress_ratio: totalAttempts > 0 ? Math.min(1, completedAttempts / totalAttempts) : undefined,
+                current_attempt_id: attempt.attempt_id,
+                current_provider_id: attempt.provider_id,
+                current_audio_id: attempt.audio_id,
+                message: job.cancel_requested ? 'Cancelling after current attempt...' : 'Running once benchmark.',
+              };
+              runJobs.set(job.job_id, job);
+            },
           });
 
-    job.status = 'succeeded';
+    job.status = job.cancel_requested ? 'cancelled' : 'succeeded';
     job.summary = summary;
     job.finished_at = new Date().toISOString();
+    if (job.cancel_requested) {
+      job.cancelled_at = job.finished_at;
+    }
+    job.progress = {
+      completed_attempts: summary.attempt_count,
+      total_attempts: job.request.mode === 'once' ? job.progress?.total_attempts ?? summary.attempt_count : job.progress?.total_attempts,
+      elapsed_ms: job.progress?.elapsed_ms,
+      duration_ms: job.progress?.duration_ms,
+      current_attempt_id: job.progress?.current_attempt_id,
+      current_provider_id: job.progress?.current_provider_id,
+      current_audio_id: job.progress?.current_audio_id,
+      progress_ratio: 1,
+      message: job.cancel_requested ? 'Job cancelled.' : 'Job completed successfully.',
+    };
     runJobs.set(job.job_id, job);
   } catch (error) {
-    job.status = 'failed';
+    job.status = job.cancel_requested ? 'cancelled' : 'failed';
     job.finished_at = new Date().toISOString();
+    if (job.cancel_requested) {
+      job.cancelled_at = job.finished_at;
+    }
     job.error = {
       message: error instanceof Error ? error.message : String(error),
+    };
+    job.progress = {
+      completed_attempts: job.progress?.completed_attempts ?? 0,
+      total_attempts: job.progress?.total_attempts,
+      progress_ratio: job.progress?.progress_ratio,
+      elapsed_ms: job.progress?.elapsed_ms,
+      duration_ms: job.progress?.duration_ms,
+      current_attempt_id: job.progress?.current_attempt_id,
+      current_provider_id: job.progress?.current_provider_id,
+      current_audio_id: job.progress?.current_audio_id,
+      message: job.cancel_requested ? 'Job cancelled.' : 'Job failed.',
     };
     runJobs.set(job.job_id, job);
   }
@@ -699,6 +824,7 @@ function renderIndexHtml(): string {
         runs: [],
         providers: [],
         jobs: [],
+        demoAssets: null,
         activeRunId: null,
         activeRun: null,
         rawAttemptById: {},
@@ -828,9 +954,16 @@ function renderIndexHtml(): string {
         const message = state.runFormMessage
           ? '<div class="detail-block" style="padding:10px 12px;font-size:12px;">' + escapeHtml(state.runFormMessage) + '</div>'
           : '';
+        const demoButtons = state.demoAssets
+          ? '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+              '<button id="run-form-use-demo" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Use demo dataset</button>' +
+              '<button id="run-form-use-demo-provider" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Select demo provider</button>' +
+            '</div>'
+          : '';
 
         root.innerHTML =
           message +
+          demoButtons +
           '<label>Mode<select id="run-form-mode">' +
             '<option value="once"' + (state.runForm.mode === 'once' ? ' selected' : '') + '>Once</option>' +
             '<option value="duration"' + (state.runForm.mode === 'duration' ? ' selected' : '') + '>Duration</option>' +
@@ -863,6 +996,14 @@ function renderIndexHtml(): string {
         if (submit) {
           submit.addEventListener('click', submitRunForm);
         }
+        const useDemo = document.getElementById('run-form-use-demo');
+        if (useDemo) {
+          useDemo.addEventListener('click', applyDemoDatasetPreset);
+        }
+        const useDemoProvider = document.getElementById('run-form-use-demo-provider');
+        if (useDemoProvider) {
+          useDemoProvider.addEventListener('click', applyDemoProviderPreset);
+        }
       }
 
       function renderJobList() {
@@ -877,22 +1018,42 @@ function renderIndexHtml(): string {
           const statusTag =
             job.status === 'succeeded'
               ? '<span class="tag">done</span>'
+              : job.status === 'cancelled'
+                ? '<span class="tag alert">cancelled</span>'
               : job.status === 'failed'
                 ? '<span class="tag alert">failed</span>'
                 : '<span class="tag">' + escapeHtml(job.status) + '</span>';
+          const progress = job.progress || {};
+          const ratio = typeof progress.progress_ratio === 'number' ? Math.max(0, Math.min(1, progress.progress_ratio)) : 0;
+          const progressLabel = progress.total_attempts
+            ? progress.completed_attempts + '/' + progress.total_attempts + ' attempts'
+            : (progress.elapsed_ms !== undefined && progress.duration_ms !== undefined
+                ? progress.completed_attempts + ' attempts in ' + progress.elapsed_ms + ' / ' + progress.duration_ms + ' ms'
+                : progress.completed_attempts + ' attempts');
           const runLink = job.summary?.run_id
             ? '<button class="job-open-run" data-run-id="' + escapeHtml(job.summary.run_id) + '" style="margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Open run</button>'
+            : '';
+          const cancelButton = (job.status === 'queued' || job.status === 'running') && !job.cancel_requested
+            ? '<button class="job-cancel" data-job-id="' + escapeHtml(job.job_id) + '" style="margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Cancel</button>'
             : '';
           const errorMessage = job.error?.message
             ? '<p class="muted" style="margin:8px 0 0;color:#b94a32;">' + escapeHtml(job.error.message) + '</p>'
             : '';
+          const progressBar =
+            '<div style="margin-top:10px;">' +
+              '<div class="bar-track" style="height:8px;"><div class="bar-fill" style="width:' + Math.round(ratio * 100) + '%;"></div></div>' +
+              '<p class="muted" style="margin:6px 0 0;">' + escapeHtml(progress.message || progressLabel) + '</p>' +
+              '<p class="muted" style="margin:4px 0 0;">' + escapeHtml(progressLabel) + '</p>' +
+            '</div>';
           return '<div class="run-card">' +
             statusTag +
             '<div class="tag">' + escapeHtml(job.request.mode) + '</div>' +
             '<h3 style="margin-top:10px;font-size:15px;">' + escapeHtml(job.job_id) + '</h3>' +
             '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(job.request.providerIds.join(', ')) + '</p>' +
             '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(job.request.inputPath) + '</p>' +
+            progressBar +
             errorMessage +
+            cancelButton +
             runLink +
           '</div>';
         }).join('');
@@ -901,6 +1062,11 @@ function renderIndexHtml(): string {
           node.addEventListener('click', async () => {
             const runId = node.getAttribute('data-run-id');
             await loadRuns(runId);
+          });
+        });
+        root.querySelectorAll('.job-cancel').forEach((node) => {
+          node.addEventListener('click', async () => {
+            await cancelJob(node.getAttribute('data-job-id'));
           });
         });
       }
@@ -940,6 +1106,13 @@ function renderIndexHtml(): string {
         renderRunSidebarControls();
       }
 
+      async function loadDemoAssets() {
+        const response = await fetch('/api/demo-assets');
+        const data = await response.json();
+        state.demoAssets = data;
+        renderRunCreateControls();
+      }
+
       async function loadJobs() {
         const response = await fetch('/api/jobs?limit=8');
         const data = await response.json();
@@ -952,7 +1125,7 @@ function renderIndexHtml(): string {
             state.seenCompletedJobs[job.job_id] = true;
             preferredRunId = preferredRunId || job.summary.run_id;
           }
-          if ((job.status === 'failed' || job.status === 'succeeded') && !state.seenCompletedJobs[job.job_id]) {
+          if ((job.status === 'failed' || job.status === 'succeeded' || job.status === 'cancelled') && !state.seenCompletedJobs[job.job_id]) {
             state.seenCompletedJobs[job.job_id] = true;
           }
         });
@@ -963,6 +1136,15 @@ function renderIndexHtml(): string {
         }
 
         scheduleJobPolling();
+      }
+
+      async function cancelJob(jobId) {
+        if (!jobId) return;
+        await fetch('/api/jobs/' + encodeURIComponent(jobId) + '/cancel', {
+          method: 'POST',
+        });
+        state.runFormMessage = 'Cancellation requested.';
+        await loadJobs();
       }
 
       async function loadRun(runId) {
@@ -1169,6 +1351,28 @@ function renderIndexHtml(): string {
           .map((node) => node.value);
         state.runFormErrors = {};
         state.runFormMessage = '';
+      }
+
+      function applyDemoDatasetPreset() {
+        if (!state.demoAssets) return;
+        state.runForm.inputPath = state.demoAssets.demo_input_path || state.runForm.inputPath;
+        state.runForm.manifestPath = state.demoAssets.demo_manifest_path || state.runForm.manifestPath;
+        state.runForm.referenceSidecar = true;
+        state.runForm.referenceDir = '';
+        state.runFormMessage = 'Loaded demo dataset paths.';
+        renderRunCreateControls();
+      }
+
+      function applyDemoProviderPreset() {
+        const match = state.providers.find((provider) => provider.provider_id === 'openai-whisper-demo');
+        if (!match) {
+          state.runFormMessage = 'Demo provider is only available when the UI is started with --config examples/demo-provider.';
+          renderRunCreateControls();
+          return;
+        }
+        state.runForm.providerIds = [match.provider_id];
+        state.runFormMessage = 'Selected demo provider.';
+        renderRunCreateControls();
       }
 
       function validateRunForm() {
@@ -1502,7 +1706,7 @@ function renderIndexHtml(): string {
         }
       }
 
-      Promise.all([loadProviders(), loadJobs(), loadRuns()]).catch((error) => {
+      Promise.all([loadProviders(), loadDemoAssets(), loadJobs(), loadRuns()]).catch((error) => {
         document.getElementById('content').innerHTML = '<section class="panel empty">Failed to load runs: ' + escapeHtml(error.message || String(error)) + '</section>';
       });
     </script>

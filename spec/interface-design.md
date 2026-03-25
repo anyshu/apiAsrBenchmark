@@ -252,8 +252,10 @@ asrbench --db artifacts/asrbench.sqlite ui:serve --port 3000
 
 ```http
 GET /api/providers
+GET /api/demo-assets
 GET /api/jobs
 GET /api/jobs/:job_id
+POST /api/jobs/:job_id/cancel
 GET /api/runs
 GET /api/runs/:run_id
 GET /api/runs/:run_id/attempts/:attempt_id/raw
@@ -263,8 +265,10 @@ GET /
 
 说明：
 - `/api/providers` 返回已加载的 provider 配置摘要，用于 UI 选择
+- `/api/demo-assets` 返回 demo dataset / provider 的推荐本地路径，供 UI 快捷填充
 - `/api/jobs` 返回最近的浏览器触发 run job 列表
 - `/api/jobs/:job_id` 返回单个后台 job 的状态、错误、summary
+- `/api/jobs/:job_id/cancel` 请求取消一个 queued / running job
 - `/api/runs` 返回 run summary 列表
 - `/api/runs` 支持 `provider`、`mode`、`failures`、`created_after`、`created_before`、`query`
 - `/api/runs/:run_id` 返回 summary + attempts
@@ -319,6 +323,27 @@ GET /
   "field_errors": {
     "inputPath": "Input path does not exist.",
     "providerIds": "Select at least one provider."
+  }
+}
+```
+
+### 7.3 Job 响应摘要
+
+```json
+{
+  "job": {
+    "job_id": "job_1234abcd",
+    "status": "running",
+    "cancel_requested": false,
+    "progress": {
+      "completed_attempts": 3,
+      "total_attempts": 12,
+      "progress_ratio": 0.25,
+      "current_attempt_id": "openai-whisper-demo__sample__r1",
+      "current_provider_id": "openai-whisper-demo",
+      "current_audio_id": "sample",
+      "message": "Running once benchmark."
+    }
   }
 }
 ```

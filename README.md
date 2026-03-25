@@ -19,7 +19,7 @@ Current implementation includes:
 - dataset manifest loading from `dataset.manifest.json`, `manifest.json`, or `--manifest`
 - sidecar or external reference transcript loading
 - WER / CER scoring
-- minimal local web dashboard over SQLite, with run filters, validated web run creation, background jobs, attempt filters, transcript diff, and manifest metadata display
+- minimal local web dashboard over SQLite, with run filters, validated web run creation, background jobs, cancellation, attempt filters, transcript diff, and manifest metadata display
 
 ## Install
 
@@ -143,7 +143,9 @@ The dashboard now supports:
 - run filtering by provider / mode / failures / search text
 - starting `run:once` or `run:duration` jobs from the browser
 - non-blocking background job polling for browser-triggered runs
+- cooperative cancellation for queued / running browser jobs
 - inline form validation and structured field errors
+- demo dataset shortcuts for quickly filling the form
 - provider / status / text filters
 - min latency / min WER thresholds
 - sorting by latency / WER / retries / recency
@@ -226,6 +228,8 @@ Notes:
 For a quick smoke test, the repo includes:
 - `/Users/hc/working/github/audioApibench/examples/demo-dataset`
 - `/Users/hc/working/github/audioApibench/examples/demo-provider`
+- `/Users/hc/working/github/audioApibench/scripts/smoke-openai-demo.sh`
+- `/Users/hc/working/github/audioApibench/scripts/smoke-zenmux-demo.sh`
 
 Example:
 
@@ -263,4 +267,4 @@ Per run and per provider:
 - provider-level `runner_options` override CLI defaults during `run:duration`
 - retry policy uses exponential backoff from `retry_policy.backoff_ms`
 - ZenMux is modeled as an independent provider type, not only as a generic OpenAI-compatible endpoint
-- the local UI uses `GET /api/providers`, `GET /api/jobs`, `GET /api/runs`, `GET /api/runs/:run_id`, `GET /api/runs/:run_id/attempts/:attempt_id/raw`, and `POST /api/run`
+- the local UI uses `GET /api/providers`, `GET /api/demo-assets`, `GET /api/jobs`, `GET /api/jobs/:job_id`, `POST /api/jobs/:job_id/cancel`, `GET /api/runs`, `GET /api/runs/:run_id`, `GET /api/runs/:run_id/attempts/:attempt_id/raw`, and `POST /api/run`
