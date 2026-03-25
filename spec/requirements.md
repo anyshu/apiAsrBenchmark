@@ -80,6 +80,7 @@
 - CLI 负责 provider 列表、验证、运行、启动 UI
 - CLI 负责 SQLite run 查询与导出
 - 本地 Web UI 从 SQLite 读取 runs / attempts，不直接读取 provider-specific 逻辑
+- Web UI 支持失败 attempt 筛选、关键指标过滤、transcript diff 查看
 - 将来替换成其他 UI 形态时，不应修改 benchmark 内核
 
 ## 5. 非功能需求

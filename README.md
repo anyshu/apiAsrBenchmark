@@ -18,7 +18,7 @@ Current implementation includes:
 - SQLite run persistence
 - sidecar or external reference transcript loading
 - WER / CER scoring
-- minimal local web dashboard over SQLite
+- minimal local web dashboard over SQLite, with attempt filters and transcript diff
 
 ## Install
 
@@ -127,6 +127,13 @@ Start the local dashboard:
 ```bash
 npm run cli -- --db artifacts/asrbench.sqlite ui:serve --port 3000
 ```
+
+The dashboard now supports:
+- provider / status / text filters
+- min latency / min WER thresholds
+- sorting by latency / WER / retries / recency
+- failure diagnostics on the selected attempt
+- side-by-side reference vs hypothesis diff chips
 
 List recent runs from SQLite:
 

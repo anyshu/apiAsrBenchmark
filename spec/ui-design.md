@@ -25,6 +25,7 @@
 - Run 概览卡片
 - Provider Summary 表格
 - Attempt 列表表格
+- Attempt detail / transcript diff 侧栏
 
 ## 4. 视觉方向
 
@@ -52,12 +53,12 @@
 2. 自动请求 `/api/runs`
 3. 默认加载最新一个 run
 4. 点击左侧 run 卡片切换详情
+5. 在 attempt 面板按 provider / status / WER / latency 过滤
+6. 点击某个 attempt 查看 failure diagnostics 和 transcript diff
 
 ## 7. 后续演进方向
 
 - latency 分布图
 - WER/CER 分布图
-- 失败 attempt 筛选
-- transcript diff 视图
 - provider 配置编辑器
 - run 创建表单

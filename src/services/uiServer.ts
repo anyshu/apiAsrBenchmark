@@ -96,6 +96,8 @@ function renderIndexHtml(): string {
         --accent: #0d7a5f;
         --accent-soft: rgba(13, 122, 95, 0.1);
         --warm: #d96c3d;
+        --danger: #b94a32;
+        --danger-soft: rgba(185, 74, 50, 0.1);
       }
 
       * { box-sizing: border-box; }
@@ -170,10 +172,22 @@ function renderIndexHtml(): string {
         margin-right: 6px;
       }
 
+      .tag.alert {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
       .grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: 12px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+        gap: 16px;
+        align-items: start;
       }
 
       .metric {
@@ -185,6 +199,33 @@ function renderIndexHtml(): string {
 
       .metric .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
       .metric .value { font-size: 28px; margin-top: 4px; }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      input, select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,0.8);
+        color: var(--ink);
+        font: inherit;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -197,6 +238,18 @@ function renderIndexHtml(): string {
         text-align: left;
         vertical-align: top;
         padding: 10px 8px;
+      }
+
+      tr.attempt-row {
+        cursor: pointer;
+      }
+
+      tr.attempt-row:hover {
+        background: rgba(13, 122, 95, 0.05);
+      }
+
+      tr.attempt-row.active {
+        background: rgba(13, 122, 95, 0.1);
       }
 
       .empty {
@@ -213,6 +266,42 @@ function renderIndexHtml(): string {
         );
       }
 
+      .detail-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .detail-block {
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.72);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .detail-block pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, "SFMono-Regular", monospace;
+        font-size: 12px;
+      }
+
+      .diff-chip {
+        display: inline-block;
+        margin: 0 4px 4px 0;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: rgba(29, 27, 23, 0.06);
+      }
+
+      .diff-chip.insert { background: rgba(13, 122, 95, 0.16); }
+      .diff-chip.delete { background: rgba(185, 74, 50, 0.16); }
+      .diff-chip.same { background: rgba(29, 27, 23, 0.06); }
+
+      @media (max-width: 1180px) {
+        .split { grid-template-columns: 1fr; }
+      }
+
       @media (max-width: 920px) {
         .shell { grid-template-columns: 1fr; }
         .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -223,7 +312,7 @@ function renderIndexHtml(): string {
     <div class="shell">
       <aside class="sidebar">
         <h1>ASR Bench</h1>
-        <p class="subtitle">SQLite-backed runs, latency, retries, and transcript accuracy in one place.</p>
+        <p class="subtitle">SQLite-backed runs, latency, retries, transcript accuracy, and failure triage in one place.</p>
         <div id="run-list" class="run-list"></div>
       </aside>
       <main class="content" id="content">
@@ -231,7 +320,20 @@ function renderIndexHtml(): string {
       </main>
     </div>
     <script>
-      const state = { runs: [], activeRunId: null };
+      const state = {
+        runs: [],
+        activeRunId: null,
+        activeRun: null,
+        filters: {
+          provider: 'all',
+          status: 'all',
+          search: '',
+          sort: 'latency_desc',
+          minLatency: '',
+          minWer: '',
+        },
+        selectedAttemptId: null,
+      };
 
       function fmt(value) {
         if (value === null || value === undefined || value === '') return '-';
@@ -240,6 +342,13 @@ function renderIndexHtml(): string {
 
       function metric(label, value) {
         return '<div class="metric"><div class="label">' + label + '</div><div class="value">' + fmt(value) + '</div></div>';
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;');
       }
 
       function renderRunList() {
@@ -251,9 +360,11 @@ function renderIndexHtml(): string {
 
         root.innerHTML = state.runs.map((run) => {
           const active = run.run_id === state.activeRunId ? 'active' : '';
+          const failureTag = run.failure_count > 0 ? '<div class="tag alert">' + run.failure_count + ' failures</div>' : '';
           return '<div class="run-card ' + active + '" data-run-id="' + run.run_id + '">' +
             '<div class="tag">' + run.mode + '</div>' +
             '<div class="tag">' + run.attempt_count + ' attempts</div>' +
+            failureTag +
             '<h3 style="margin-top:10px;font-size:16px;">' + run.run_id + '</h3>' +
             '<p class="muted" style="margin:8px 0 0;">' + new Date(run.created_at).toLocaleString() + '</p>' +
             '<p class="muted" style="margin:8px 0 0;">avg latency ' + fmt(run.average_latency_ms) + ' ms, avg WER ' + fmt(run.average_wer) + '</p>' +
@@ -285,18 +396,35 @@ function renderIndexHtml(): string {
 
         const response = await fetch('/api/runs/' + encodeURIComponent(runId));
         const data = await response.json();
-        const summary = data.summary;
-        const attempts = data.attempts || [];
+        state.activeRun = data;
+        state.selectedAttemptId = data.attempts?.[0]?.attempt_id || null;
+        resetFiltersForRun(data);
+        renderActiveRun();
+      }
+
+      function resetFiltersForRun(data) {
+        const providers = new Set((data.attempts || []).map((item) => item.provider_id));
+        if (!providers.has(state.filters.provider)) {
+          state.filters.provider = 'all';
+        }
+      }
+
+      function renderActiveRun() {
+        if (!state.activeRun) return;
+        const summary = state.activeRun.summary;
+        const attempts = filteredAttempts();
+        const selectedAttempt = resolveSelectedAttempt(attempts, state.activeRun.attempts || []);
 
         document.getElementById('content').innerHTML =
           '<section class="panel">' +
             '<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">' +
-              '<div><h2>' + summary.run_id + '</h2><p class="muted" style="margin-top:8px;">' + summary.input_path + '</p></div>' +
-              '<div><span class="tag">' + summary.mode + '</span><span class="tag">' + summary.provider_ids.join(', ') + '</span></div>' +
+              '<div><h2>' + summary.run_id + '</h2><p class="muted" style="margin-top:8px;">' + escapeHtml(summary.input_path) + '</p></div>' +
+              '<div><span class="tag">' + summary.mode + '</span><span class="tag">' + summary.provider_ids.map(escapeHtml).join(', ') + '</span></div>' +
             '</div>' +
             '<div class="grid" style="margin-top:16px;">' +
               metric('Attempts', summary.attempt_count) +
               metric('Success', summary.success_count) +
+              metric('Failures', summary.failure_count) +
               metric('Avg latency', summary.average_latency_ms === undefined ? '-' : summary.average_latency_ms + ' ms') +
               metric('P95 latency', summary.p95_latency_ms === undefined ? '-' : summary.p95_latency_ms + ' ms') +
               metric('Retries', summary.total_retry_count) +
@@ -305,34 +433,272 @@ function renderIndexHtml(): string {
             '</div>' +
           '</section>' +
           '<section class="panel">' +
-            '<h3 style="margin-bottom:12px;">Provider Summary</h3>' +
+            '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">' +
+              '<div><h3 style="margin-bottom:12px;">Provider Summary</h3></div>' +
+              '<div class="tag">filtered attempts ' + attempts.length + '</div>' +
+            '</div>' +
             renderProviderTable(summary.provider_summaries || []) +
           '</section>' +
           '<section class="panel">' +
-            '<h3 style="margin-bottom:12px;">Attempts</h3>' +
-            renderAttemptTable(attempts) +
+            '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">' +
+              '<div><h3 style="margin-bottom:6px;">Attempts</h3><p class="muted" style="margin:0;">Filter failures, high latency, high WER, and inspect one sample in detail.</p></div>' +
+            '</div>' +
+            renderAttemptFilters(state.activeRun.attempts || []) +
+            '<div class="split" style="margin-top:16px;">' +
+              '<div>' + renderAttemptTable(attempts, selectedAttempt) + '</div>' +
+              '<div>' + renderAttemptDetail(selectedAttempt) + '</div>' +
+            '</div>' +
           '</section>';
+
+        bindFilters();
+        bindAttemptRows();
       }
 
       function renderProviderTable(rows) {
         if (!rows.length) return '<div class="empty">No provider summaries.</div>';
         return '<table><thead><tr><th>provider</th><th>attempts</th><th>avg latency</th><th>retries</th><th>avg WER</th><th>avg CER</th></tr></thead><tbody>' +
-          rows.map((row) => '<tr><td>' + row.provider_id + '</td><td>' + row.attempt_count + '</td><td>' + fmt(row.average_latency_ms) + '</td><td>' + fmt(row.total_retry_count) + '</td><td>' + fmt(row.average_wer) + '</td><td>' + fmt(row.average_cer) + '</td></tr>').join('') +
+          rows.map((row) => '<tr><td>' + escapeHtml(row.provider_id) + '</td><td>' + row.attempt_count + '</td><td>' + fmt(row.average_latency_ms) + '</td><td>' + fmt(row.total_retry_count) + '</td><td>' + fmt(row.average_wer) + '</td><td>' + fmt(row.average_cer) + '</td></tr>').join('') +
           '</tbody></table>';
       }
 
-      function renderAttemptTable(rows) {
-        if (!rows.length) return '<div class="empty">No attempts stored for this run.</div>';
+      function renderAttemptFilters(rows) {
+        const providers = Array.from(new Set(rows.map((row) => row.provider_id))).sort();
+        return '<div class="controls">' +
+          '<label>Provider<select id="provider-filter"><option value="all">All providers</option>' + providers.map((provider) => '<option value="' + escapeHtml(provider) + '"' + (provider === state.filters.provider ? ' selected' : '') + '>' + escapeHtml(provider) + '</option>').join('') + '</select></label>' +
+          '<label>Status<select id="status-filter">' +
+            optionMarkup('status', 'all', 'All attempts') +
+            optionMarkup('status', 'success', 'Success only') +
+            optionMarkup('status', 'failure', 'Failures only') +
+            optionMarkup('status', 'high_latency', 'High latency') +
+            optionMarkup('status', 'high_wer', 'High WER') +
+          '</select></label>' +
+          '<label>Search<input id="search-filter" type="text" placeholder="provider, text, error..." value="' + escapeHtml(state.filters.search) + '" /></label>' +
+          '<label>Sort<select id="sort-filter">' +
+            optionMarkup('sort', 'latency_desc', 'Latency desc') +
+            optionMarkup('sort', 'latency_asc', 'Latency asc') +
+            optionMarkup('sort', 'wer_desc', 'WER desc') +
+            optionMarkup('sort', 'retry_desc', 'Retry desc') +
+            optionMarkup('sort', 'recent_desc', 'Newest first') +
+          '</select></label>' +
+          '<label>Min latency ms<input id="latency-filter" type="number" min="0" step="1" placeholder="1000" value="' + escapeHtml(state.filters.minLatency) + '" /></label>' +
+          '<label>Min WER<input id="wer-filter" type="number" min="0" max="1" step="0.01" placeholder="0.2" value="' + escapeHtml(state.filters.minWer) + '" /></label>' +
+        '</div>';
+      }
+
+      function optionMarkup(group, value, label) {
+        const selected = state.filters[group] === value ? ' selected' : '';
+        return '<option value="' + value + '"' + selected + '>' + label + '</option>';
+      }
+
+      function bindFilters() {
+        ['provider-filter', 'status-filter', 'search-filter', 'sort-filter', 'latency-filter', 'wer-filter'].forEach((id) => {
+          const node = document.getElementById(id);
+          if (!node) return;
+          node.addEventListener('input', updateFiltersFromDom);
+          node.addEventListener('change', updateFiltersFromDom);
+        });
+      }
+
+      function updateFiltersFromDom() {
+        state.filters.provider = document.getElementById('provider-filter').value;
+        state.filters.status = document.getElementById('status-filter').value;
+        state.filters.search = document.getElementById('search-filter').value.trim().toLowerCase();
+        state.filters.sort = document.getElementById('sort-filter').value;
+        state.filters.minLatency = document.getElementById('latency-filter').value.trim();
+        state.filters.minWer = document.getElementById('wer-filter').value.trim();
+        renderActiveRun();
+      }
+
+      function filteredAttempts() {
+        const attempts = state.activeRun?.attempts || [];
+        const minLatency = Number.parseFloat(state.filters.minLatency);
+        const minWer = Number.parseFloat(state.filters.minWer);
+
+        const rows = attempts.filter((row) => {
+          if (state.filters.provider !== 'all' && row.provider_id !== state.filters.provider) return false;
+          if (state.filters.status === 'success' && !row.success) return false;
+          if (state.filters.status === 'failure' && row.success) return false;
+          if (state.filters.status === 'high_latency' && !(Number(row.latency_ms) >= (Number.isFinite(minLatency) ? minLatency : 1000))) return false;
+          if (state.filters.status === 'high_wer' && !((row.evaluation?.word_error_rate ?? -1) >= (Number.isFinite(minWer) ? minWer : 0.2))) return false;
+
+          const haystack = [
+            row.provider_id,
+            row.audio_id,
+            row.audio_path,
+            row.error?.type,
+            row.normalized_result?.text,
+            row.evaluation?.reference_text,
+          ].filter(Boolean).join(' ').toLowerCase();
+
+          if (state.filters.search && !haystack.includes(state.filters.search)) return false;
+          if (Number.isFinite(minLatency) && Number(row.latency_ms) < minLatency) return false;
+          if (Number.isFinite(minWer) && (row.evaluation?.word_error_rate ?? -1) < minWer) return false;
+          return true;
+        });
+
+        return rows.sort(sortAttemptRows);
+      }
+
+      function sortAttemptRows(a, b) {
+        switch (state.filters.sort) {
+          case 'latency_asc':
+            return Number(a.latency_ms) - Number(b.latency_ms);
+          case 'wer_desc':
+            return Number(b.evaluation?.word_error_rate ?? -1) - Number(a.evaluation?.word_error_rate ?? -1);
+          case 'retry_desc':
+            return Number(b.retry_count) - Number(a.retry_count);
+          case 'recent_desc':
+            return String(b.started_at).localeCompare(String(a.started_at));
+          case 'latency_desc':
+          default:
+            return Number(b.latency_ms) - Number(a.latency_ms);
+        }
+      }
+
+      function renderAttemptTable(rows, selectedAttempt) {
+        if (!rows.length) return '<div class="empty">No attempts match the current filters.</div>';
         return '<table><thead><tr><th>provider</th><th>audio</th><th>latency</th><th>retry</th><th>status</th><th>WER</th><th>CER</th><th>text</th></tr></thead><tbody>' +
-          rows.map((row) => '<tr><td>' + row.provider_id + '</td><td>' + row.audio_id + '</td><td>' + fmt(row.latency_ms) + '</td><td>' + fmt(row.retry_count) + '</td><td>' + (row.success ? 'ok' : fmt(row.error && row.error.type)) + '</td><td>' + fmt(row.evaluation && row.evaluation.word_error_rate) + '</td><td>' + fmt(row.evaluation && row.evaluation.char_error_rate) + '</td><td>' + escapeHtml(row.normalized_result && row.normalized_result.text || '') + '</td></tr>').join('') +
+          rows.map((row) => {
+            const active = selectedAttempt && row.attempt_id === selectedAttempt.attempt_id ? ' active' : '';
+            const text = row.normalized_result?.text || '';
+            return '<tr class="attempt-row' + active + '" data-attempt-id="' + row.attempt_id + '">' +
+              '<td>' + escapeHtml(row.provider_id) + '</td>' +
+              '<td>' + escapeHtml(row.audio_id) + '</td>' +
+              '<td>' + fmt(row.latency_ms) + '</td>' +
+              '<td>' + fmt(row.retry_count) + '</td>' +
+              '<td>' + (row.success ? '<span class="tag">ok</span>' : '<span class="tag alert">' + escapeHtml(fmt(row.error?.type)) + '</span>') + '</td>' +
+              '<td>' + fmt(row.evaluation?.word_error_rate) + '</td>' +
+              '<td>' + fmt(row.evaluation?.char_error_rate) + '</td>' +
+              '<td>' + escapeHtml(text.slice(0, 100)) + (text.length > 100 ? '...' : '') + '</td>' +
+            '</tr>';
+          }).join('') +
           '</tbody></table>';
       }
 
-      function escapeHtml(value) {
-        return String(value)
-          .replaceAll('&', '&amp;')
-          .replaceAll('<', '&lt;')
-          .replaceAll('>', '&gt;');
+      function bindAttemptRows() {
+        document.querySelectorAll('[data-attempt-id]').forEach((node) => {
+          node.addEventListener('click', () => {
+            state.selectedAttemptId = node.getAttribute('data-attempt-id');
+            renderActiveRun();
+          });
+        });
+      }
+
+      function resolveSelectedAttempt(filtered, allAttempts) {
+        if (state.selectedAttemptId) {
+          const match = filtered.find((item) => item.attempt_id === state.selectedAttemptId) || allAttempts.find((item) => item.attempt_id === state.selectedAttemptId);
+          if (match) return match;
+        }
+        return filtered[0] || allAttempts[0] || null;
+      }
+
+      function renderAttemptDetail(row) {
+        if (!row) {
+          return '<div class="detail-block empty">Select an attempt to inspect transcript diff and failure details.</div>';
+        }
+
+        const text = row.normalized_result?.text || '';
+        const reference = row.evaluation?.reference_text || '';
+        const diffHtml = reference ? renderWordDiff(reference, text) : '<div class="muted">No reference transcript attached for this attempt.</div>';
+        const metadata = {
+          attempt_id: row.attempt_id,
+          provider_id: row.provider_id,
+          audio_id: row.audio_id,
+          audio_path: row.audio_path,
+          latency_ms: row.latency_ms,
+          retry_count: row.retry_count,
+          request_attempts: row.request_attempts,
+          http_status: row.http_status,
+          status: row.success ? 'ok' : row.error?.type || 'failed',
+        };
+
+        return '<div class="detail-stack">' +
+          '<div class="detail-block">' +
+            '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap;">' +
+              '<h3>Attempt Detail</h3>' +
+              (row.success ? '<span class="tag">success</span>' : '<span class="tag alert">failure</span>') +
+            '</div>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(JSON.stringify(metadata, null, 2)) + '</pre>' +
+          '</div>' +
+          '<div class="detail-block">' +
+            '<h4>Failure Diagnostics</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(row.error ? JSON.stringify(row.error, null, 2) : 'No error for this attempt.') + '</pre>' +
+          '</div>' +
+          '<div class="detail-block">' +
+            '<h4>Transcript Diff</h4>' +
+            '<div style="margin-top:12px;">' + diffHtml + '</div>' +
+          '</div>' +
+          '<div class="detail-block">' +
+            '<h4>Reference Transcript</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(reference || 'No reference transcript.') + '</pre>' +
+          '</div>' +
+          '<div class="detail-block">' +
+            '<h4>Hypothesis Transcript</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(text || 'No normalized transcript.') + '</pre>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function renderWordDiff(referenceText, hypothesisText) {
+        const ref = tokenize(referenceText);
+        const hyp = tokenize(hypothesisText);
+        const matrix = Array.from({ length: ref.length + 1 }, () => Array(hyp.length + 1).fill(0));
+
+        for (let i = 0; i <= ref.length; i += 1) matrix[i][0] = i;
+        for (let j = 0; j <= hyp.length; j += 1) matrix[0][j] = j;
+
+        for (let i = 1; i <= ref.length; i += 1) {
+          for (let j = 1; j <= hyp.length; j += 1) {
+            const cost = ref[i - 1] === hyp[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(
+              matrix[i - 1][j] + 1,
+              matrix[i][j - 1] + 1,
+              matrix[i - 1][j - 1] + cost,
+            );
+          }
+        }
+
+        const ops = [];
+        let i = ref.length;
+        let j = hyp.length;
+        while (i > 0 || j > 0) {
+          if (i > 0 && j > 0 && ref[i - 1] === hyp[j - 1]) {
+            ops.push({ type: 'same', ref: ref[i - 1], hyp: hyp[j - 1] });
+            i -= 1;
+            j -= 1;
+            continue;
+          }
+
+          const sub = i > 0 && j > 0 ? matrix[i - 1][j - 1] : Number.POSITIVE_INFINITY;
+          const del = i > 0 ? matrix[i - 1][j] : Number.POSITIVE_INFINITY;
+          const ins = j > 0 ? matrix[i][j - 1] : Number.POSITIVE_INFINITY;
+          const min = Math.min(sub, del, ins);
+
+          if (min === sub) {
+            ops.push({ type: 'replace', ref: ref[i - 1], hyp: hyp[j - 1] });
+            i -= 1;
+            j -= 1;
+          } else if (min === del) {
+            ops.push({ type: 'delete', ref: ref[i - 1] });
+            i -= 1;
+          } else {
+            ops.push({ type: 'insert', hyp: hyp[j - 1] });
+            j -= 1;
+          }
+        }
+
+        return ops.reverse().map((op) => {
+          if (op.type === 'same') return '<span class="diff-chip same">' + escapeHtml(op.hyp) + '</span>';
+          if (op.type === 'delete') return '<span class="diff-chip delete">-' + escapeHtml(op.ref) + '</span>';
+          if (op.type === 'insert') return '<span class="diff-chip insert">+' + escapeHtml(op.hyp) + '</span>';
+          return '<span class="diff-chip delete">-' + escapeHtml(op.ref) + '</span><span class="diff-chip insert">+' + escapeHtml(op.hyp) + '</span>';
+        }).join(' ');
+      }
+
+      function tokenize(text) {
+        const normalized = String(text || '').toLowerCase().trim();
+        if (!normalized) return [];
+        return normalized.split(/\\s+/).filter(Boolean);
       }
 
       loadRuns().catch((error) => {
