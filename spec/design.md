@@ -76,6 +76,7 @@
 - `artifacts/runs/<run-id>/summary.csv`
 - `artifacts/runs/<run-id>/raw/*.json`
 - `artifacts/asrbench.sqlite`
+- SQLite 查询服务支持 `run:list`、`run:show`、`run:export`
 
 SQLite 的作用：
 - 供 UI 快速查询 runs 列表

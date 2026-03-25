@@ -6,5 +6,6 @@ export * from './services/runDurationService.js';
 export * from './services/validationService.js';
 export * from './services/runOnceService.js';
 export * from './services/references.js';
+export * from './services/runQueryService.js';
 export * from './services/sqliteStore.js';
 export * from './services/uiServer.js';

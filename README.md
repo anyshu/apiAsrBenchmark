@@ -13,7 +13,7 @@ Current implementation includes:
 - provider switcher for runtime routing
 - `audio_transcriptions`, `chat_completions_audio`, and `responses_audio` request shapes
 - provider-level `retry_policy` and `runner_options`
-- `provider:list`, `provider:validate`, `run:once`, `run:duration`, and `ui:serve` CLI commands
+- `provider:list`, `provider:validate`, `run:once`, `run:duration`, `run:list`, `run:show`, `run:export`, and `ui:serve` CLI commands
 - JSONL / JSON / CSV artifact generation
 - SQLite run persistence
 - sidecar or external reference transcript loading
@@ -126,6 +126,30 @@ Start the local dashboard:
 
 ```bash
 npm run cli -- --db artifacts/asrbench.sqlite ui:serve --port 3000
+```
+
+List recent runs from SQLite:
+
+```bash
+npm run cli -- --db artifacts/asrbench.sqlite run:list --limit 10
+```
+
+Show one run summary:
+
+```bash
+npm run cli -- --db artifacts/asrbench.sqlite run:show --run-id <run-id>
+```
+
+Show one run with attempts:
+
+```bash
+npm run cli -- --db artifacts/asrbench.sqlite run:show --run-id <run-id> --attempts
+```
+
+Export one run:
+
+```bash
+npm run cli -- --db artifacts/asrbench.sqlite run:export --run-id <run-id> --format csv --output exports/run.csv
 ```
 
 ## Artifacts and persistence

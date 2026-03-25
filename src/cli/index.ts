@@ -106,6 +106,65 @@ program
   );
 
 program
+  .command('run:list')
+  .description('List benchmark runs stored in SQLite')
+  .option('--limit <n>', 'max number of runs to return', '20')
+  .action(async (options: { limit: string }) => {
+    const globalOptions = program.opts<{ db: string }>();
+    const { listRuns } = await import('../services/runQueryService.js');
+    const runs = await listRuns({
+      dbPath: globalOptions.db,
+      limit: Number.parseInt(options.limit, 10),
+    });
+    console.log(JSON.stringify({ runs }, null, 2));
+  });
+
+program
+  .command('run:show')
+  .description('Show one benchmark run from SQLite')
+  .requiredOption('--run-id <id>', 'run id')
+  .option('--attempts', 'include attempts in the output', false)
+  .action(async (options: { runId: string; attempts: boolean }) => {
+    const globalOptions = program.opts<{ db: string }>();
+    const { showRun } = await import('../services/runQueryService.js');
+    const run = options.attempts
+      ? await showRun({
+          dbPath: globalOptions.db,
+          runId: options.runId,
+          includeAttempts: true,
+        })
+      : await showRun({
+          dbPath: globalOptions.db,
+          runId: options.runId,
+        });
+    console.log(JSON.stringify(run, null, 2));
+  });
+
+program
+  .command('run:export')
+  .description('Export one benchmark run from SQLite')
+  .requiredOption('--run-id <id>', 'run id')
+  .requiredOption('--format <format>', 'export format: json, jsonl, csv')
+  .option('--output <path>', 'write export to a file instead of stdout')
+  .action(async (options: { runId: string; format: 'json' | 'jsonl' | 'csv'; output?: string }) => {
+    const globalOptions = program.opts<{ db: string }>();
+    const { exportRun } = await import('../services/runQueryService.js');
+    const exported = await exportRun({
+      dbPath: globalOptions.db,
+      runId: options.runId,
+      format: options.format,
+      outputPath: options.output,
+    });
+
+    if (exported.outputPath) {
+      console.log(JSON.stringify({ output_path: exported.outputPath }, null, 2));
+      return;
+    }
+
+    process.stdout.write(exported.content);
+  });
+
+program
   .command('ui:serve')
   .description('Serve a lightweight local dashboard backed by the SQLite run store')
   .option('--host <host>', 'host to bind', '127.0.0.1')

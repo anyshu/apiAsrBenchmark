@@ -204,6 +204,9 @@ asrbench provider:list
 asrbench provider:validate --provider openai-whisper --audio ./samples/a.wav
 asrbench --reference-sidecar run:once --providers openai-whisper --input ./samples --rounds 3
 asrbench --reference-dir ./refs run:duration --providers zenmux-gemini-chat --input ./samples --duration-ms 30000 --concurrency 2 --interval-ms 100
+asrbench --db ./artifacts/asrbench.sqlite run:list --limit 20
+asrbench --db ./artifacts/asrbench.sqlite run:show --run-id run_123 --attempts
+asrbench --db ./artifacts/asrbench.sqlite run:export --run-id run_123 --format csv --output ./exports/run_123.csv
 asrbench --db artifacts/asrbench.sqlite ui:serve --port 3000
 ```
 
