@@ -1,0 +1,20 @@
+provider_id: custom-http-demo
+name: Custom HTTP Demo Provider
+type: custom_http
+base_url: https://example.com
+api_key_env: CUSTOM_HTTP_API_KEY
+adapter_options:
+  endpoint:
+    method: POST
+    path: /asr/recognize
+  request:
+    content_type: multipart
+    file_field: audio
+    model_field: model
+    fields:
+      engine: fast
+      include_timestamps: false
+  response_mapping:
+    transcript_path: $.result.text
+    language_path: $.result.language
+    duration_path: $.result.duration_ms

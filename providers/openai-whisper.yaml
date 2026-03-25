@@ -1,0 +1,12 @@
+provider_id: openai-whisper
+name: OpenAI Audio Transcriptions
+type: openai_compatible
+base_url: https://api.openai.com/v1
+api_key_env: OPENAI_API_KEY
+default_model: gpt-4o-mini-transcribe
+adapter_options:
+  operation: audio_transcriptions
+  transcription_path: /audio/transcriptions
+  response_format: verbose_json
+  timestamp_granularities:
+    - segment

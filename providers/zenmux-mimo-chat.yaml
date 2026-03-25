@@ -1,0 +1,11 @@
+provider_id: zenmux-mimo-chat
+name: ZenMux MIMO Audio Chat
+type: zenmux
+base_url: https://zenmux.ai/api/v1
+api_key_env: ZENMUX_API_KEY
+default_model: xiaomi/mimo-v2-omni
+adapter_options:
+  operation: chat_completions_audio
+  chat_path: /chat/completions
+  text_prompt: Please transcribe this audio faithfully. Return plain text only.
+  audio_format: wav

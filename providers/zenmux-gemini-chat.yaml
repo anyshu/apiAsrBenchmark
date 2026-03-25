@@ -1,0 +1,11 @@
+provider_id: zenmux-gemini-chat
+name: ZenMux Gemini Audio Chat
+type: zenmux
+base_url: https://zenmux.ai/api/v1
+api_key_env: ZENMUX_API_KEY
+default_model: google/gemini-2.5-pro
+adapter_options:
+  operation: chat_completions_audio
+  chat_path: /chat/completions
+  text_prompt: Please transcribe this audio faithfully. Return plain text only.
+  audio_format: wav

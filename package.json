@@ -1,0 +1,30 @@
+{
+  "name": "audioapibench",
+  "version": "1.0.0",
+  "description": "Audio ASR benchmark CLI for API-based providers",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "bin": {
+    "asrbench": "dist/src/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "cli": "node --import tsx src/cli/index.ts",
+    "test": "node --import tsx --test test/**/*.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "commander": "^14.0.3",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.1"
+  }
+}
