@@ -1,23 +1,24 @@
 # audioApibench
 
-API-based audio ASR benchmark scaffold.
+API-based audio ASR benchmark scaffold with pluggable providers, sustained execution controls, SQLite persistence, and a lightweight local web UI.
 
 ## Current status
 
-Current first-pass implementation includes:
+Current implementation includes:
 - TypeScript project scaffold
 - provider config loader (single file or provider directory)
 - `openai_compatible` adapter
 - `zenmux` adapter
 - `custom_http` adapter
-- `audio_transcriptions` request mode
-- `chat_completions_audio` request mode
-- ZenMux-compatible chat audio validation path
-- `provider:list` CLI command
-- `provider:validate` CLI command
-- `run:once` CLI command
-- dry-run request preview
-- basic adapter tests
+- provider switcher for runtime routing
+- `audio_transcriptions`, `chat_completions_audio`, and `responses_audio` request shapes
+- provider-level `retry_policy` and `runner_options`
+- `provider:list`, `provider:validate`, `run:once`, `run:duration`, and `ui:serve` CLI commands
+- JSONL / JSON / CSV artifact generation
+- SQLite run persistence
+- sidecar or external reference transcript loading
+- WER / CER scoring
+- minimal local web dashboard over SQLite
 
 ## Install
 
@@ -27,7 +28,7 @@ npm install
 
 ## Provider config layout
 
-Providers now live as independent config files under `/Users/hc/working/github/audioApibench/providers`.
+Providers live as independent config files under `/Users/hc/working/github/audioApibench/providers`.
 
 Current examples:
 - `/Users/hc/working/github/audioApibench/providers/custom-http-example.yaml`
@@ -35,7 +36,29 @@ Current examples:
 - `/Users/hc/working/github/audioApibench/providers/zenmux-gemini-chat.yaml`
 - `/Users/hc/working/github/audioApibench/providers/zenmux-mimo-chat.yaml`
 
-This is the preferred layout because adding or changing a provider should only require editing config, not code.
+Recommended provider fields:
+
+```yaml
+provider_id: zenmux-gemini-chat
+name: ZenMux Gemini Audio Chat
+type: zenmux
+base_url: https://zenmux.ai/api/v1
+api_key_env: ZENMUX_API_KEY
+default_model: google/gemini-2.5-pro
+retry_policy:
+  max_attempts: 2
+  backoff_ms: 500
+runner_options:
+  concurrency: 1
+  interval_ms: 200
+adapter_options:
+  operation: chat_completions_audio
+  chat_path: /chat/completions
+  text_prompt: Please transcribe this audio faithfully. Return plain text only.
+  audio_format: wav
+```
+
+This layout keeps provider onboarding config-driven: new providers usually require a new YAML file, not code edits.
 
 ## CLI usage
 
@@ -54,28 +77,23 @@ OPENAI_API_KEY=... npm run cli -- provider:validate \
   --dry-run
 ```
 
-Validate a ZenMux-style chat audio provider:
+Run one benchmark pass and write SQLite + artifacts:
 
 ```bash
-ZENMUX_API_KEY=... npm run cli -- provider:validate \
-  --provider zenmux-gemini-chat \
-  --audio /path/to/sample.wav \
-  --dry-run
-```
-
-Run one benchmark pass:
-
-```bash
-ZENMUX_API_KEY=... npm run cli -- run:once \
+ZENMUX_API_KEY=... npm run cli -- \
+  --db artifacts/asrbench.sqlite \
+  run:once \
   --providers zenmux-gemini-chat \
   --input /path/to/audio-dir \
   --rounds 3
 ```
 
-Run a sustained benchmark:
+Run a sustained benchmark with default global scheduling:
 
 ```bash
-ZENMUX_API_KEY=... npm run cli -- run:duration \
+ZENMUX_API_KEY=... npm run cli -- \
+  --db artifacts/asrbench.sqlite \
+  run:duration \
   --providers zenmux-gemini-chat \
   --input /path/to/audio-dir \
   --duration-ms 30000 \
@@ -83,24 +101,65 @@ ZENMUX_API_KEY=... npm run cli -- run:duration \
   --interval-ms 100
 ```
 
-Validate a custom HTTP provider:
+Enable sidecar references (`sample.wav` -> `sample.txt`) and compute WER/CER:
 
 ```bash
-CUSTOM_HTTP_API_KEY=... npm run cli -- provider:validate \
-  --provider custom-http-demo \
-  --audio /path/to/sample.wav \
-  --dry-run
+OPENAI_API_KEY=... npm run cli -- \
+  --reference-sidecar \
+  run:once \
+  --providers openai-whisper \
+  --input /path/to/audio-dir
 ```
+
+Use a separate reference directory with mirrored relative paths:
+
+```bash
+OPENAI_API_KEY=... npm run cli -- \
+  --reference-dir /path/to/references \
+  run:duration \
+  --providers openai-whisper \
+  --input /path/to/audio-dir \
+  --duration-ms 20000
+```
+
+Start the local dashboard:
+
+```bash
+npm run cli -- --db artifacts/asrbench.sqlite ui:serve --port 3000
+```
+
+## Artifacts and persistence
+
+Each run still writes file artifacts under `artifacts/runs/<run-id>/`:
+- `attempts.jsonl`
+- `summary.json`
+- `summary.csv`
+- `raw/*.json`
+
+In addition, summaries and attempts are persisted into SQLite, defaulting to:
+- `/Users/hc/working/github/audioApibench/artifacts/asrbench.sqlite`
+
+## Metrics
+
+Per attempt:
+- latency
+- HTTP status
+- retry count / request attempts
+- normalized transcript
+- timestamps when provider returns them
+- WER / CER when a reference transcript is available
+
+Per run and per provider:
+- p50 / p90 / p95 latency
+- average RTF when audio duration is known
+- total / average retries
+- average WER / CER
+- failure type counts
 
 ## Notes
 
-- `provider:validate` writes a validation report to `artifacts/providers/<provider-id>.validation.json`
-- `run:once` writes run artifacts under `artifacts/runs/<run-id>/`
-- `run:once` now supports `--rounds` and writes both `summary.json` and `summary.csv`
-- `run:duration` supports `--duration-ms`, `--concurrency`, and `--interval-ms`
-- summary now includes per-provider aggregates, p50/p90/p95 latency, failure type counts, and `rtf` when audio duration is available
 - secrets are read from `api_key_env` when configured
-- request previews redact auth headers before writing reports
-- the default CLI config path is the provider directory `/Users/hc/working/github/audioApibench/providers`
-- ZenMux is now modeled as an independent provider type in config
-- provider routing now goes through a provider switcher, which chooses between generic `openai_compatible` and provider-specific implementations such as `zenmux`
+- auth headers are redacted in request previews
+- provider-level `runner_options` override CLI defaults during `run:duration`
+- retry policy uses exponential backoff from `retry_policy.backoff_ms`
+- ZenMux is modeled as an independent provider type, not only as a generic OpenAI-compatible endpoint

@@ -4,6 +4,12 @@ type: openai_compatible
 base_url: https://api.openai.com/v1
 api_key_env: OPENAI_API_KEY
 default_model: gpt-4o-mini-transcribe
+retry_policy:
+  max_attempts: 2
+  backoff_ms: 250
+runner_options:
+  concurrency: 1
+  interval_ms: 0
 adapter_options:
   operation: audio_transcriptions
   transcription_path: /audio/transcriptions

@@ -1,11 +1,17 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { BenchAttemptRecord, BenchRunSummary, ProviderConfig } from '../domain/types.js';
+import type { AudioAsset, BenchAttemptRecord, BenchRunSummary, ProviderConfig } from '../domain/types.js';
 import { loadProvidersConfig, resolveProviderSecrets } from '../config/loadProviders.js';
 import { DefaultProviderSwitcher } from '../providers/switcher.js';
 import { collectAudioAssets } from '../utils/audio.js';
 import { createAttemptRecord, finalizeRunArtifacts, writeRawAttemptArtifact } from './benchmarkArtifacts.js';
+import {
+  executeWithRetry,
+  resolveProviderConcurrency,
+  resolveProviderIntervalMs,
+} from './providerExecution.js';
+import { attachReferenceTexts, evaluateTranscript } from './references.js';
 
 export interface RunDurationOptions {
   configPath: string;
@@ -15,12 +21,16 @@ export interface RunDurationOptions {
   concurrency?: number;
   intervalMs?: number;
   outputRoot?: string;
+  dbPath?: string;
+  referenceSidecar?: boolean;
+  referenceDir?: string;
 }
 
-interface TaskItem {
+interface ProviderTaskState {
   provider: ProviderConfig;
-  audio: Awaited<ReturnType<typeof collectAudioAssets>>[number];
-  roundIndex: number;
+  audios: AudioAsset[];
+  nextAudioIndex: number;
+  roundCounts: Map<string, number>;
 }
 
 export async function runDuration(options: RunDurationOptions): Promise<BenchRunSummary> {
@@ -40,10 +50,12 @@ export async function runDuration(options: RunDurationOptions): Promise<BenchRun
     throw new Error(`Providers not found: ${missing.join(', ')}`);
   }
 
-  const concurrency = options.concurrency ?? 1;
-  const intervalMs = options.intervalMs ?? 0;
   const providers = selectedProviders.map((provider) => resolveProviderSecrets(provider));
-  const audioAssets = await collectAudioAssets(options.inputPath);
+  const audioAssets = await attachReferenceTexts(await collectAudioAssets(options.inputPath), {
+    inputPath: options.inputPath,
+    sidecar: options.referenceSidecar,
+    referenceDir: options.referenceDir,
+  });
   const switcher = new DefaultProviderSwitcher();
   const createdAt = new Date().toISOString();
   const runId = `run_${createdAt.replace(/[:.]/g, '-')}__${crypto.randomUUID().slice(0, 8)}`;
@@ -58,90 +70,86 @@ export async function runDuration(options: RunDurationOptions): Promise<BenchRun
   const attempts: BenchAttemptRecord[] = [];
   const startedAtMs = Date.now();
   const deadlineMs = startedAtMs + options.durationMs;
-  let nextIndex = 0;
+  const states = providers.map<ProviderTaskState>((provider) => ({
+    provider,
+    audios: audioAssets,
+    nextAudioIndex: 0,
+    roundCounts: new Map<string, number>(),
+  }));
 
-  const providerAudioPairs = providers.flatMap((provider) =>
-    audioAssets.map((audio) => ({ provider, audio })),
-  );
-  const roundCounts = new Map<string, number>();
+  async function runProviderWorker(state: ProviderTaskState): Promise<void> {
+    const adapter = switcher.resolve(state.provider);
+    const intervalMs = resolveProviderIntervalMs(state.provider, options.intervalMs);
 
-  async function getNextTask(): Promise<TaskItem | undefined> {
-    const now = Date.now();
-    if (now >= deadlineMs || providerAudioPairs.length === 0) {
-      return undefined;
-    }
-
-    const pair = providerAudioPairs[nextIndex % providerAudioPairs.length];
-    nextIndex += 1;
-    const key = `${pair.provider.provider_id}__${pair.audio.audio_id}`;
-    const roundIndex = (roundCounts.get(key) ?? 0) + 1;
-    roundCounts.set(key, roundIndex);
-
-    if (intervalMs > 0) {
-      await sleep(intervalMs);
-      if (Date.now() >= deadlineMs) {
-        return undefined;
-      }
-    }
-
-    return {
-      provider: pair.provider,
-      audio: pair.audio,
-      roundIndex,
-    };
-  }
-
-  async function worker(): Promise<void> {
-    while (true) {
-      const task = await getNextTask();
-      if (!task) {
+    while (Date.now() < deadlineMs) {
+      const audio = nextAudio(state);
+      if (!audio) {
         return;
       }
 
-      const adapter = switcher.resolve(task.provider);
-      const executionResult = await adapter.execute({
-        provider: task.provider,
-        audio: task.audio,
-      });
+      const roundIndex = nextRoundIndex(state, audio);
+      const execution = await executeWithRetry(adapter, { provider: state.provider, audio });
+      const executionResult = execution.result;
       const latencyMs =
         new Date(executionResult.finishedAt).getTime() - new Date(executionResult.startedAt).getTime();
-      const attemptId = `${task.provider.provider_id}__${task.audio.audio_id}__r${task.roundIndex}`;
+      const attemptId = `${state.provider.provider_id}__${audio.audio_id}__r${roundIndex}`;
 
       await writeRawAttemptArtifact(rawDir, attemptId, {
-        provider_id: task.provider.provider_id,
-        audio_id: task.audio.audio_id,
-        round_index: task.roundIndex,
+        provider_id: state.provider.provider_id,
+        audio_id: audio.audio_id,
+        round_index: roundIndex,
         execution_result: executionResult,
+        retry_history: execution.retryHistory,
       });
 
-      const attempt = createAttemptRecord({
-        attemptId,
-        runId,
-        providerId: task.provider.provider_id,
-        audioId: task.audio.audio_id,
-        audioPath: task.audio.path,
-        audioDurationMs: task.audio.duration_ms,
-        roundIndex: task.roundIndex,
-        startedAt: executionResult.startedAt,
-        finishedAt: executionResult.finishedAt,
-        latencyMs,
-        success: executionResult.ok,
-        httpStatus: executionResult.statusCode,
-        error: executionResult.error,
-      });
+      let normalizedResult: BenchAttemptRecord['normalized_result'];
+      let evaluation: BenchAttemptRecord['evaluation'];
 
       if (executionResult.ok) {
-        attempt.normalized_result = await adapter.normalize({
-          provider: task.provider,
+        normalizedResult = await adapter.normalize({
+          provider: state.provider,
           executionResult,
         });
+        if (audio.reference_text) {
+          evaluation = evaluateTranscript(audio.reference_text, normalizedResult.text);
+        }
       }
 
-      attempts.push(attempt);
+      attempts.push(
+        createAttemptRecord({
+          attemptId,
+          runId,
+          providerId: state.provider.provider_id,
+          audioId: audio.audio_id,
+          audioPath: audio.path,
+          audioDurationMs: audio.duration_ms,
+          roundIndex,
+          startedAt: executionResult.startedAt,
+          finishedAt: executionResult.finishedAt,
+          latencyMs,
+          success: executionResult.ok,
+          requestAttempts: execution.requestAttempts,
+          retryCount: execution.retryCount,
+          httpStatus: executionResult.statusCode,
+          error: executionResult.error,
+          normalizedText: normalizedResult,
+          evaluation,
+        }),
+      );
+
+      if (intervalMs > 0 && Date.now() < deadlineMs) {
+        await sleep(intervalMs);
+      }
     }
   }
 
-  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, () => worker()));
+  const workers = states.flatMap((state) =>
+    Array.from({ length: resolveProviderConcurrency(state.provider, options.concurrency) }, () =>
+      runProviderWorker(state),
+    ),
+  );
+
+  await Promise.all(workers);
 
   const maxRound = attempts.reduce((max, attempt) => Math.max(max, attempt.round_index), 0);
   return finalizeRunArtifacts({
@@ -152,11 +160,28 @@ export async function runDuration(options: RunDurationOptions): Promise<BenchRun
     inputPath: path.resolve(options.inputPath),
     rounds: maxRound,
     durationMs: options.durationMs,
-    concurrency,
-    intervalMs,
+    concurrency: options.concurrency,
+    intervalMs: options.intervalMs,
     attempts,
     runDir,
+    dbPath: options.dbPath,
   });
+}
+
+function nextAudio(state: ProviderTaskState): AudioAsset | undefined {
+  if (state.audios.length === 0) {
+    return undefined;
+  }
+  const audio = state.audios[state.nextAudioIndex % state.audios.length];
+  state.nextAudioIndex += 1;
+  return audio;
+}
+
+function nextRoundIndex(state: ProviderTaskState, audio: AudioAsset): number {
+  const key = `${state.provider.provider_id}__${audio.audio_id}`;
+  const roundIndex = (state.roundCounts.get(key) ?? 0) + 1;
+  state.roundCounts.set(key, roundIndex);
+  return roundIndex;
 }
 
 async function sleep(ms: number): Promise<void> {

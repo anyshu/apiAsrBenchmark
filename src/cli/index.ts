@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { loadProvidersConfig } from '../config/loadProviders.js';
-import { runDuration } from '../services/runDurationService.js';
-import { runOnce } from '../services/runOnceService.js';
-import { validateProvider } from '../services/validationService.js';
 
 const program = new Command();
 
 program
   .name('asrbench')
   .description('Audio ASR benchmark CLI')
-  .option('-c, --config <path>', 'provider config file or directory', 'providers');
+  .option('-c, --config <path>', 'provider config file or directory', 'providers')
+  .option('--db <path>', 'SQLite path for persisted benchmark runs', 'artifacts/asrbench.sqlite')
+  .option('--reference-sidecar', 'load same-basename .txt references next to audio files', false)
+  .option('--reference-dir <path>', 'directory containing .txt references mapped by audio relative path');
 
 program
   .command('provider:list')
@@ -31,6 +31,7 @@ program
   .option('--dry-run', 'only preview the request without sending it', false)
   .action(async (options: { provider: string; audio: string; dryRun: boolean }) => {
     const configPath = program.opts<{ config: string }>().config;
+    const { validateProvider } = await import('../services/validationService.js');
     const report = await validateProvider({
       configPath,
       providerId: options.provider,
@@ -47,12 +48,21 @@ program
   .requiredOption('--input <path>', 'audio file or directory path')
   .option('--rounds <n>', 'number of rounds to execute', '1')
   .action(async (options: { providers: string; input: string; rounds: string }) => {
-    const configPath = program.opts<{ config: string }>().config;
+    const globalOptions = program.opts<{
+      config: string;
+      db: string;
+      referenceSidecar: boolean;
+      referenceDir?: string;
+    }>();
+    const { runOnce } = await import('../services/runOnceService.js');
     const summary = await runOnce({
-      configPath,
+      configPath: globalOptions.config,
       providerIds: options.providers.split(',').map((value) => value.trim()).filter(Boolean),
       inputPath: options.input,
       rounds: Number.parseInt(options.rounds, 10),
+      dbPath: globalOptions.db,
+      referenceSidecar: globalOptions.referenceSidecar,
+      referenceDir: globalOptions.referenceDir,
     });
     console.log(JSON.stringify(summary, null, 2));
   });
@@ -63,8 +73,8 @@ program
   .requiredOption('--providers <ids>', 'comma-separated provider ids')
   .requiredOption('--input <path>', 'audio file or directory path')
   .requiredOption('--duration-ms <n>', 'benchmark duration in milliseconds')
-  .option('--concurrency <n>', 'number of concurrent workers', '1')
-  .option('--interval-ms <n>', 'delay before scheduling each task', '0')
+  .option('--concurrency <n>', 'default number of concurrent workers per provider', '1')
+  .option('--interval-ms <n>', 'default delay between requests for providers without overrides', '0')
   .action(
     async (options: {
       providers: string;
@@ -73,18 +83,43 @@ program
       concurrency: string;
       intervalMs: string;
     }) => {
-      const configPath = program.opts<{ config: string }>().config;
+      const globalOptions = program.opts<{
+        config: string;
+        db: string;
+        referenceSidecar: boolean;
+        referenceDir?: string;
+      }>();
+      const { runDuration } = await import('../services/runDurationService.js');
       const summary = await runDuration({
-        configPath,
+        configPath: globalOptions.config,
         providerIds: options.providers.split(',').map((value) => value.trim()).filter(Boolean),
         inputPath: options.input,
         durationMs: Number.parseInt(options.durationMs, 10),
         concurrency: Number.parseInt(options.concurrency, 10),
         intervalMs: Number.parseInt(options.intervalMs, 10),
+        dbPath: globalOptions.db,
+        referenceSidecar: globalOptions.referenceSidecar,
+        referenceDir: globalOptions.referenceDir,
       });
       console.log(JSON.stringify(summary, null, 2));
     },
   );
+
+program
+  .command('ui:serve')
+  .description('Serve a lightweight local dashboard backed by the SQLite run store')
+  .option('--host <host>', 'host to bind', '127.0.0.1')
+  .option('--port <n>', 'port to bind', '3000')
+  .action(async (options: { host: string; port: string }) => {
+    const globalOptions = program.opts<{ db: string }>();
+    const { startUiServer } = await import('../services/uiServer.js');
+    const server = await startUiServer({
+      dbPath: globalOptions.db,
+      host: options.host,
+      port: Number.parseInt(options.port, 10),
+    });
+    console.log(JSON.stringify({ url: server.url, db_path: globalOptions.db }, null, 2));
+  });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);

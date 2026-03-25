@@ -6,6 +6,8 @@ import { loadProvidersConfig, resolveProviderSecrets } from '../config/loadProvi
 import { DefaultProviderSwitcher } from '../providers/switcher.js';
 import { collectAudioAssets } from '../utils/audio.js';
 import { createAttemptRecord, finalizeRunArtifacts, writeRawAttemptArtifact } from './benchmarkArtifacts.js';
+import { executeWithRetry } from './providerExecution.js';
+import { attachReferenceTexts, evaluateTranscript } from './references.js';
 
 export interface RunOnceOptions {
   configPath: string;
@@ -13,6 +15,9 @@ export interface RunOnceOptions {
   inputPath: string;
   rounds?: number;
   outputRoot?: string;
+  dbPath?: string;
+  referenceSidecar?: boolean;
+  referenceDir?: string;
 }
 
 export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary> {
@@ -34,7 +39,11 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
   }
 
   const providers = selectedProviders.map((provider) => resolveProviderSecrets(provider));
-  const audioAssets = await collectAudioAssets(options.inputPath);
+  const audioAssets = await attachReferenceTexts(await collectAudioAssets(options.inputPath), {
+    inputPath: options.inputPath,
+    sidecar: options.referenceSidecar,
+    referenceDir: options.referenceDir,
+  });
   const switcher = new DefaultProviderSwitcher();
   const createdAt = new Date().toISOString();
   const runId = `run_${createdAt.replace(/[:.]/g, '-')}__${crypto.randomUUID().slice(0, 8)}`;
@@ -50,16 +59,32 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
 
     for (let roundIndex = 1; roundIndex <= rounds; roundIndex += 1) {
       for (const audio of audioAssets) {
-        const executionResult = await adapter.execute({ provider, audio });
+        const execution = await executeWithRetry(adapter, { provider, audio });
+        const executionResult = execution.result;
         const latencyMs =
           new Date(executionResult.finishedAt).getTime() - new Date(executionResult.startedAt).getTime();
         const attemptId = `${provider.provider_id}__${audio.audio_id}__r${roundIndex}`;
+
         await writeRawAttemptArtifact(rawDir, attemptId, {
           provider_id: provider.provider_id,
           audio_id: audio.audio_id,
           round_index: roundIndex,
           execution_result: executionResult,
+          retry_history: execution.retryHistory,
         });
+
+        let normalizedResult: BenchAttemptRecord['normalized_result'];
+        let evaluation: BenchAttemptRecord['evaluation'];
+
+        if (executionResult.ok) {
+          normalizedResult = await adapter.normalize({
+            provider,
+            executionResult,
+          });
+          if (audio.reference_text) {
+            evaluation = evaluateTranscript(audio.reference_text, normalizedResult.text);
+          }
+        }
 
         const attempt: BenchAttemptRecord = createAttemptRecord({
           attemptId,
@@ -73,16 +98,13 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
           finishedAt: executionResult.finishedAt,
           latencyMs,
           success: executionResult.ok,
+          requestAttempts: execution.requestAttempts,
+          retryCount: execution.retryCount,
           httpStatus: executionResult.statusCode,
           error: executionResult.error,
+          normalizedText: normalizedResult,
+          evaluation,
         });
-
-        if (executionResult.ok) {
-          attempt.normalized_result = await adapter.normalize({
-            provider,
-            executionResult,
-          });
-        }
 
         attempts.push(attempt);
       }
@@ -98,5 +120,6 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
     rounds,
     attempts,
     runDir,
+    dbPath: options.dbPath,
   });
 }

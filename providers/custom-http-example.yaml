@@ -3,6 +3,12 @@ name: Custom HTTP Demo Provider
 type: custom_http
 base_url: https://example.com
 api_key_env: CUSTOM_HTTP_API_KEY
+retry_policy:
+  max_attempts: 3
+  backoff_ms: 300
+runner_options:
+  concurrency: 2
+  interval_ms: 100
 adapter_options:
   endpoint:
     method: POST

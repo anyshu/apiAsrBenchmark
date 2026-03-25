@@ -2,57 +2,62 @@
 
 ## 1. 设计结论
 
-第一阶段建议 CLI 为主；如果需要 UI，建议做一个很薄的本地 Web UI，通过 HTTP API 调用核心服务。
+第一阶段 UI 采用很薄的本地 Web dashboard：
+- benchmark 核心仍然由 CLI / service 层执行
+- UI 不参与 provider-specific 请求构造
+- UI 只消费 SQLite 中的 run / attempt 数据
 
 ## 2. UI 目标
 
-- 配置 provider
-- 发起 benchmark
-- 查看进度
-- 查看 summary
-- 查看失败诊断
+- 查看 benchmark runs 列表
+- 查看单个 run 的核心统计
+- 查看 provider 维度 summary
+- 查看 attempt 明细
+- 快速定位高延迟、高重试、高 WER/CER 的样本
 
-## 3. 页面设计
+## 3. 页面结构
 
-1. Provider 列表页
-2. Provider 验证页
-3. 新建 Run 页
-4. Run 详情页
-5. Attempt 浏览页
-6. Summary Dashboard
+### 左侧 Sidebar
+- run 列表
+- 展示 run id、模式、attempt 数、平均延迟、平均 WER
 
-## 4. 关键组件
+### 主内容区
+- Run 概览卡片
+- Provider Summary 表格
+- Attempt 列表表格
 
-### Provider Form
-- Name
-- Type
-- Base URL
-- API Key
-- Default Model
-- Adapter Options 编辑器
-- Validate 按钮
+## 4. 视觉方向
 
-### Run Builder
-- Provider 多选
-- 输入路径选择
-- 音频格式过滤
-- 运行模式
-- 并发数
-- 速率限制
-- 输出目录
+- 本地工具但不走“朴素后台管理页”风格
+- 使用暖色纸面感背景 + 绿色强调色
+- 卡片化布局，便于未来扩展更多图表
+- 移动端退化为单列布局
 
-### Run Detail
-- Run 状态
-- 进度条
-- attempt 数
-- 成功/失败统计
-- latency 图表
-- transcript 预览表
-- failure diagnostics 面板
+## 5. 数据来源
 
-## 5. 技术原则
+当前 UI 不直接读取 `artifacts/runs/*` 文件，而是走本地 HTTP API：
+- `GET /api/runs`
+- `GET /api/runs/:run_id`
 
-- UI 不写 provider-specific 逻辑
-- UI 不直接读写 artifacts
-- 所有核心能力由应用层提供
-- 将来更换成桌面 UI 时不改 benchmark 内核
+这样后续替换为：
+- Electron
+- 桌面客户端
+- 更完整的前后端分离页面
+
+都不需要重写 benchmark 核心。
+
+## 6. 最小交互
+
+1. 打开 `/`
+2. 自动请求 `/api/runs`
+3. 默认加载最新一个 run
+4. 点击左侧 run 卡片切换详情
+
+## 7. 后续演进方向
+
+- latency 分布图
+- WER/CER 分布图
+- 失败 attempt 筛选
+- transcript diff 视图
+- provider 配置编辑器
+- run 创建表单

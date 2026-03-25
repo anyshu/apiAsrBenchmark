@@ -9,6 +9,11 @@ export interface RetryPolicy {
   backoffMs?: number;
 }
 
+export interface ProviderRunnerOptions {
+  concurrency?: number;
+  interval_ms?: number;
+}
+
 export interface OpenAICompatibleAdapterOptions {
   operation?: OpenAICompatibleOperation;
   transcription_path?: string;
@@ -62,6 +67,7 @@ export interface ProviderConfig {
   headers?: Record<string, string>;
   timeout_ms?: number;
   retry_policy?: RetryPolicy;
+  runner_options?: ProviderRunnerOptions;
   adapter_options?:
     | Record<string, unknown>
     | OpenAICompatibleAdapterOptions
@@ -79,6 +85,20 @@ export interface AudioAsset {
   format: string;
   size_bytes: number;
   duration_ms?: number;
+  reference_text?: string;
+  reference_path?: string;
+}
+
+export interface AccuracyMetrics {
+  reference_text: string;
+  normalized_reference_text: string;
+  normalized_hypothesis_text: string;
+  word_error_rate: number;
+  char_error_rate: number;
+  word_distance: number;
+  char_distance: number;
+  reference_word_count: number;
+  reference_char_count: number;
 }
 
 export interface BenchAttemptRecord {
@@ -94,9 +114,12 @@ export interface BenchAttemptRecord {
   latency_ms: number;
   rtf?: number;
   success: boolean;
+  request_attempts: number;
+  retry_count: number;
   http_status?: number;
   error?: ProviderExecutionError;
   normalized_result?: NormalizedAsrResult;
+  evaluation?: AccuracyMetrics;
 }
 
 export interface BenchRunSummary {
@@ -115,11 +138,17 @@ export interface BenchRunSummary {
   attempts_path: string;
   summary_path: string;
   csv_path: string;
+  database_path?: string;
   average_latency_ms?: number;
   p50_latency_ms?: number;
   p90_latency_ms?: number;
   p95_latency_ms?: number;
   average_rtf?: number;
+  total_retry_count: number;
+  average_retry_count?: number;
+  evaluated_attempt_count: number;
+  average_wer?: number;
+  average_cer?: number;
   failure_type_counts: Record<string, number>;
   provider_summaries: BenchProviderSummary[];
 }
@@ -134,6 +163,11 @@ export interface BenchProviderSummary {
   p90_latency_ms?: number;
   p95_latency_ms?: number;
   average_rtf?: number;
+  total_retry_count: number;
+  average_retry_count?: number;
+  evaluated_attempt_count: number;
+  average_wer?: number;
+  average_cer?: number;
   failure_type_counts: Record<string, number>;
 }
 
@@ -172,6 +206,19 @@ export interface ProviderExecutionResult {
   startedAt: string;
   finishedAt: string;
   error?: ProviderExecutionError;
+}
+
+export interface ProviderExecutionEnvelope {
+  result: ProviderExecutionResult;
+  requestAttempts: number;
+  retryCount: number;
+  retryHistory: Array<{
+    attempt: number;
+    statusCode?: number;
+    error?: ProviderExecutionError;
+    startedAt: string;
+    finishedAt: string;
+  }>;
 }
 
 export interface NormalizedSegment {

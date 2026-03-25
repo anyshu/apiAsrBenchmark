@@ -5,6 +5,7 @@ import type {
   BenchProviderSummary,
   BenchRunSummary,
 } from '../domain/types.js';
+import { persistRunToSqlite } from './sqliteStore.js';
 
 export interface FinalizeRunArtifactsInput {
   runId: string;
@@ -18,6 +19,7 @@ export interface FinalizeRunArtifactsInput {
   intervalMs?: number;
   attempts: BenchAttemptRecord[];
   runDir: string;
+  dbPath?: string;
 }
 
 export async function finalizeRunArtifacts(input: FinalizeRunArtifactsInput): Promise<BenchRunSummary> {
@@ -37,6 +39,14 @@ export async function finalizeRunArtifacts(input: FinalizeRunArtifactsInput): Pr
   const rtfValues = input.attempts
     .map((item) => item.rtf)
     .filter((value): value is number => value !== undefined);
+  const retryValues = input.attempts.map((item) => item.retry_count);
+  const evaluatedAttempts = input.attempts.filter((item) => item.evaluation);
+  const werValues = evaluatedAttempts
+    .map((item) => item.evaluation?.word_error_rate)
+    .filter((value): value is number => value !== undefined);
+  const cerValues = evaluatedAttempts
+    .map((item) => item.evaluation?.char_error_rate)
+    .filter((value): value is number => value !== undefined);
 
   const summary: BenchRunSummary = {
     run_id: input.runId,
@@ -54,6 +64,7 @@ export async function finalizeRunArtifacts(input: FinalizeRunArtifactsInput): Pr
     attempts_path: attemptsPath,
     summary_path: path.join(input.runDir, 'summary.json'),
     csv_path: csvPath,
+    database_path: input.dbPath ? path.resolve(input.dbPath) : undefined,
     average_latency_ms:
       input.attempts.length > 0
         ? Math.round(input.attempts.reduce((sum, item) => sum + item.latency_ms, 0) / input.attempts.length)
@@ -62,12 +73,33 @@ export async function finalizeRunArtifacts(input: FinalizeRunArtifactsInput): Pr
     p90_latency_ms: percentile(latencyValues, 90),
     p95_latency_ms: percentile(latencyValues, 95),
     average_rtf:
-      rtfValues.length > 0 ? roundTo3(rtfValues.reduce((sum, value) => sum + value, 0) / rtfValues.length) : undefined,
+      rtfValues.length > 0
+        ? roundTo3(rtfValues.reduce((sum, value) => sum + value, 0) / rtfValues.length)
+        : undefined,
+    total_retry_count: retryValues.reduce((sum, value) => sum + value, 0),
+    average_retry_count:
+      retryValues.length > 0
+        ? roundTo3(retryValues.reduce((sum, value) => sum + value, 0) / retryValues.length)
+        : undefined,
+    evaluated_attempt_count: evaluatedAttempts.length,
+    average_wer:
+      werValues.length > 0 ? roundTo3(werValues.reduce((sum, value) => sum + value, 0) / werValues.length) : undefined,
+    average_cer:
+      cerValues.length > 0 ? roundTo3(cerValues.reduce((sum, value) => sum + value, 0) / cerValues.length) : undefined,
     failure_type_counts: buildFailureTypeCounts(input.attempts),
     provider_summaries: providerSummaries,
   };
 
   await fs.writeFile(summary.summary_path, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+
+  if (input.dbPath) {
+    await persistRunToSqlite({
+      dbPath: input.dbPath,
+      summary,
+      attempts: input.attempts,
+    });
+  }
+
   return summary;
 }
 
@@ -91,6 +123,15 @@ export function buildProviderSummaries(attempts: BenchAttemptRecord[]): BenchPro
   return Array.from(groups.entries())
     .map(([providerId, group]) => {
       const successCount = group.filter((item) => item.success).length;
+      const retryValues = group.map((item) => item.retry_count);
+      const evaluatedAttempts = group.filter((item) => item.evaluation);
+      const werValues = evaluatedAttempts
+        .map((item) => item.evaluation?.word_error_rate)
+        .filter((value): value is number => value !== undefined);
+      const cerValues = evaluatedAttempts
+        .map((item) => item.evaluation?.char_error_rate)
+        .filter((value): value is number => value !== undefined);
+
       return {
         provider_id: providerId,
         attempt_count: group.length,
@@ -104,6 +145,16 @@ export function buildProviderSummaries(attempts: BenchAttemptRecord[]): BenchPro
         p90_latency_ms: percentile(group.map((item) => item.latency_ms), 90),
         p95_latency_ms: percentile(group.map((item) => item.latency_ms), 95),
         average_rtf: averageRtf(group),
+        total_retry_count: retryValues.reduce((sum, value) => sum + value, 0),
+        average_retry_count:
+          retryValues.length > 0
+            ? roundTo3(retryValues.reduce((sum, value) => sum + value, 0) / retryValues.length)
+            : undefined,
+        evaluated_attempt_count: evaluatedAttempts.length,
+        average_wer:
+          werValues.length > 0 ? roundTo3(werValues.reduce((sum, value) => sum + value, 0) / werValues.length) : undefined,
+        average_cer:
+          cerValues.length > 0 ? roundTo3(cerValues.reduce((sum, value) => sum + value, 0) / cerValues.length) : undefined,
         failure_type_counts: buildFailureTypeCounts(group),
       };
     })
@@ -124,8 +175,13 @@ export function toCsv(attempts: BenchAttemptRecord[]): string {
     'latency_ms',
     'rtf',
     'success',
+    'request_attempts',
+    'retry_count',
     'http_status',
     'error_type',
+    'wer',
+    'cer',
+    'reference_text',
     'text',
   ];
 
@@ -142,8 +198,13 @@ export function toCsv(attempts: BenchAttemptRecord[]): string {
     String(attempt.latency_ms),
     attempt.rtf !== undefined ? String(attempt.rtf) : '',
     String(attempt.success),
+    String(attempt.request_attempts),
+    String(attempt.retry_count),
     attempt.http_status ? String(attempt.http_status) : '',
     attempt.error?.type ?? '',
+    attempt.evaluation?.word_error_rate !== undefined ? String(attempt.evaluation.word_error_rate) : '',
+    attempt.evaluation?.char_error_rate !== undefined ? String(attempt.evaluation.char_error_rate) : '',
+    attempt.evaluation?.reference_text ?? '',
     attempt.normalized_result?.text ?? '',
   ]);
 
@@ -201,9 +262,12 @@ export function createAttemptRecord(params: {
   finishedAt: string;
   latencyMs: number;
   success: boolean;
+  requestAttempts?: number;
+  retryCount?: number;
   httpStatus?: number;
   error?: BenchAttemptRecord['error'];
   normalizedText?: BenchAttemptRecord['normalized_result'];
+  evaluation?: BenchAttemptRecord['evaluation'];
 }): BenchAttemptRecord {
   return {
     attempt_id: params.attemptId,
@@ -216,10 +280,16 @@ export function createAttemptRecord(params: {
     started_at: params.startedAt,
     finished_at: params.finishedAt,
     latency_ms: params.latencyMs,
-    rtf: params.audioDurationMs && params.audioDurationMs > 0 ? roundTo3(params.latencyMs / params.audioDurationMs) : undefined,
+    rtf:
+      params.audioDurationMs && params.audioDurationMs > 0
+        ? roundTo3(params.latencyMs / params.audioDurationMs)
+        : undefined,
     success: params.success,
+    request_attempts: params.requestAttempts ?? 1,
+    retry_count: params.retryCount ?? 0,
     http_status: params.httpStatus,
     error: params.error,
     normalized_result: params.normalizedText,
+    evaluation: params.evaluation,
   };
 }

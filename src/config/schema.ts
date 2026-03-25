@@ -21,6 +21,23 @@ const customHttpAdapterOptionsSchema = z.object({
   }),
 });
 
+const retryPolicySchema = z
+  .object({
+    maxAttempts: z.number().int().positive().optional(),
+    backoffMs: z.number().int().nonnegative().optional(),
+    max_attempts: z.number().int().positive().optional(),
+    backoff_ms: z.number().int().nonnegative().optional(),
+  })
+  .transform((value) => ({
+    maxAttempts: value.maxAttempts ?? value.max_attempts,
+    backoffMs: value.backoffMs ?? value.backoff_ms,
+  }));
+
+const runnerOptionsSchema = z.object({
+  concurrency: z.number().int().positive().optional(),
+  interval_ms: z.number().int().nonnegative().optional(),
+});
+
 export const providerConfigSchema = z.object({
   provider_id: z.string().min(1),
   name: z.string().min(1),
@@ -31,12 +48,8 @@ export const providerConfigSchema = z.object({
   default_model: z.string().min(1).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   timeout_ms: z.number().int().positive().optional(),
-  retry_policy: z
-    .object({
-      maxAttempts: z.number().int().positive().optional(),
-      backoffMs: z.number().int().nonnegative().optional(),
-    })
-    .optional(),
+  retry_policy: retryPolicySchema.optional(),
+  runner_options: runnerOptionsSchema.optional(),
   adapter_options: z.union([z.record(z.string(), z.unknown()), customHttpAdapterOptionsSchema]).optional(),
 });
 
