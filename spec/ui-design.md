@@ -18,6 +18,8 @@
 ## 3. 页面结构
 
 ### 左侧 Sidebar
+- run filters（provider / mode / failures / query）
+- create run form（mode、provider、多种 reference / manifest 参数）
 - run 列表
 - 展示 run id、模式、attempt 数、平均延迟、平均 WER
 
@@ -39,8 +41,11 @@
 ## 5. 数据来源
 
 当前 UI 不直接读取 `artifacts/runs/*` 文件，而是走本地 HTTP API：
+- `GET /api/providers`
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
+- `GET /api/runs/:run_id/attempts/:attempt_id/raw`
+- `POST /api/run`
 
 这样后续替换为：
 - Electron
@@ -52,16 +57,18 @@
 ## 6. 最小交互
 
 1. 打开 `/`
-2. 自动请求 `/api/runs`
-3. 默认加载最新一个 run
-4. 点击左侧 run 卡片切换详情
-5. 在 attempt 面板按 provider / status / WER / latency 过滤
-6. 点击某个 attempt 查看 failure diagnostics 和 transcript diff
-7. 通过图表快速判断延迟分布、质量分布和失败类型
+2. 自动请求 `/api/providers` 和 `/api/runs`
+3. 可在左侧先按 run 维度过滤历史 benchmark
+4. 可直接在浏览器内填写 create-run 表单发起 `run:once` / `run:duration`
+5. 默认加载最新一个 run
+6. 点击左侧 run 卡片切换详情
+7. 在 attempt 面板按 provider / status / WER / latency 过滤
+8. 点击某个 attempt 查看 failure diagnostics 和 transcript diff
+9. 通过图表快速判断延迟分布、质量分布和失败类型
 
 ## 7. 后续演进方向
 
 - latency 分布图
 - WER/CER 分布图
 - provider 配置编辑器
-- run 创建表单
+- 后台异步任务队列与进度反馈

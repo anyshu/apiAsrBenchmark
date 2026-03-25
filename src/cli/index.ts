@@ -9,6 +9,7 @@ program
   .description('Audio ASR benchmark CLI')
   .option('-c, --config <path>', 'provider config file or directory', 'providers')
   .option('--db <path>', 'SQLite path for persisted benchmark runs', 'artifacts/asrbench.sqlite')
+  .option('--manifest <path>', 'dataset manifest JSON path')
   .option('--reference-sidecar', 'load same-basename .txt references next to audio files', false)
   .option('--reference-dir <path>', 'directory containing .txt references mapped by audio relative path');
 
@@ -51,6 +52,7 @@ program
     const globalOptions = program.opts<{
       config: string;
       db: string;
+      manifest?: string;
       referenceSidecar: boolean;
       referenceDir?: string;
     }>();
@@ -61,6 +63,7 @@ program
       inputPath: options.input,
       rounds: Number.parseInt(options.rounds, 10),
       dbPath: globalOptions.db,
+      manifestPath: globalOptions.manifest,
       referenceSidecar: globalOptions.referenceSidecar,
       referenceDir: globalOptions.referenceDir,
     });
@@ -86,6 +89,7 @@ program
       const globalOptions = program.opts<{
         config: string;
         db: string;
+        manifest?: string;
         referenceSidecar: boolean;
         referenceDir?: string;
       }>();
@@ -98,6 +102,7 @@ program
         concurrency: Number.parseInt(options.concurrency, 10),
         intervalMs: Number.parseInt(options.intervalMs, 10),
         dbPath: globalOptions.db,
+        manifestPath: globalOptions.manifest,
         referenceSidecar: globalOptions.referenceSidecar,
         referenceDir: globalOptions.referenceDir,
       });
@@ -193,10 +198,11 @@ program
   .option('--host <host>', 'host to bind', '127.0.0.1')
   .option('--port <n>', 'port to bind', '3000')
   .action(async (options: { host: string; port: string }) => {
-    const globalOptions = program.opts<{ db: string }>();
+    const globalOptions = program.opts<{ db: string; config: string }>();
     const { startUiServer } = await import('../services/uiServer.js');
     const server = await startUiServer({
       dbPath: globalOptions.db,
+      configPath: globalOptions.config,
       host: options.host,
       port: Number.parseInt(options.port, 10),
     });

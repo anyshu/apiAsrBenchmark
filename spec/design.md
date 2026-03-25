@@ -50,6 +50,7 @@
 - 扫描输入目录
 - 生成 `audio_id`
 - 记录格式、大小、时长
+- 可选加载 dataset manifest 元信息（`language`、`speaker`、`tags`）
 - 可选挂载 reference transcript
 
 ### Provider Execution
@@ -64,6 +65,7 @@
 - attempt 记录包含 request attempts、retry count、normalized result、evaluation
 
 ### Reference Evaluation
+- manifest 模式：`reference_text` inline 或 `reference_path` 指向外部文本
 - sidecar 模式：`sample.wav` -> `sample.txt`
 - reference-dir 模式：按音频相对路径映射到 `.txt`
 - 标准化文本后计算：
@@ -86,11 +88,13 @@ SQLite 的作用：
 
 ### UI Server
 - 使用 Node 内置 `http` 提供本地 dashboard
+- `GET /api/providers`
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
 - `GET /api/runs/:run_id/attempts/:attempt_id/raw`
+- `POST /api/run`
 - `/` 返回静态 HTML + JS 页面
-- 页面支持 attempt 筛选、失败诊断、reference/hypothesis diff
+- 页面支持 run 过滤、浏览器内创建 run、attempt 筛选、失败诊断、reference/hypothesis diff
 - 页面基于当前 run 数据做轻量级条形图，不依赖前端图表库
 
 ## 4. 运行流程
@@ -107,16 +111,17 @@ SQLite 的作用：
 ### Benchmark 流程
 1. 加载 provider
 2. 扫描音频
-3. 可选加载 reference transcript
-4. 创建 run 目录与 run id
-5. 选择对应 adapter
-6. 执行请求，必要时重试
-7. 标准化结果
-8. 可选计算 WER / CER
-9. 写入 raw attempt
-10. 聚合 summary
-11. 写入 JSONL / JSON / CSV
-12. 写入 SQLite
+3. 可选加载 dataset manifest，补齐元信息与 manifest reference
+4. 可选加载 sidecar / reference-dir transcript，补齐未提供的 reference
+5. 创建 run 目录与 run id
+6. 选择对应 adapter
+7. 执行请求，必要时重试
+8. 标准化结果
+9. 可选计算 WER / CER
+10. 写入 raw attempt
+11. 聚合 summary
+12. 写入 JSONL / JSON / CSV
+13. 写入 SQLite
 
 ## 5. 失败处理
 
@@ -147,11 +152,11 @@ SQLite 的作用：
 - retry/backoff
 - SQLite 存储
 - WER / CER
-- 最小 Web UI
+- dataset manifest enrich
+- Web UI run filters / create-run form
 
 后续可继续扩展：
 - SQLite 查询统计 API
 - 更丰富的 dashboard 图表
 - streaming benchmark
-- 参考文本 manifest
 - 更精细的 tokenization / multilingual evaluation

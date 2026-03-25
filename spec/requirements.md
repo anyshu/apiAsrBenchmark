@@ -8,7 +8,8 @@
 
 - 一组 provider 配置：`base_url`、`api_key`、headers、model、重试/调度参数
 - 一组本地音频文件：`wav`、`mp3`、`m4a`、`flac`、`ogg`、`aac`
-- 可选参考文本：sidecar `.txt` 或独立 reference 目录
+- 可选参考文本：sidecar `.txt`、独立 reference 目录，或 dataset manifest 中的 inline / external reference
+- 可选 dataset manifest：为音频补充 `language`、`speaker`、`tags` 等数据集元信息
 
 ## 3. 核心问题
 
@@ -36,6 +37,8 @@
 - 支持单文件与目录输入
 - 支持递归扫描
 - 记录路径、文件名、格式、大小、音频时长、`audio_id`
+- 支持从 `dataset.manifest.json`、`manifest.json` 或显式 `--manifest` 加载数据集 metadata
+- manifest 可按音频相对路径或文件名匹配音频条目
 
 ### FR-4 Benchmark 运行
 - 支持单次运行 `run:once`
@@ -59,6 +62,7 @@
 ### FR-7 识别质量评估
 - 支持 sidecar reference（如 `a.wav` 对应 `a.txt`）
 - 支持 reference 目录映射
+- 支持 manifest `reference_text` 与 `reference_path`
 - 在有 reference 时计算 WER / CER
 - 在 attempt、provider、run 三个层级输出聚合质量指标
 
@@ -79,9 +83,10 @@
 ### FR-10 CLI 与 UI
 - CLI 负责 provider 列表、验证、运行、启动 UI
 - CLI 负责 SQLite run 查询与导出
+- CLI 全局支持 `--manifest`
 - SQLite run 查询支持按 provider、mode、失败情况、时间范围过滤
 - 本地 Web UI 从 SQLite 读取 runs / attempts，不直接读取 provider-specific 逻辑
-- Web UI 支持失败 attempt 筛选、关键指标过滤、transcript diff 查看
+- Web UI 支持 run 列表过滤、浏览器内创建 run、失败 attempt 筛选、关键指标过滤、transcript diff 查看
 - 将来替换成其他 UI 形态时，不应修改 benchmark 内核
 
 ## 5. 非功能需求
@@ -105,6 +110,7 @@
 - provider 级别调度覆盖
 - 重试 + 指数 backoff
 - JSONL / JSON / CSV + SQLite
+- dataset manifest metadata / reference enrichment
 - sidecar / reference-dir transcript
 - WER / CER
-- 最小本地 Web UI
+- 最小本地 Web UI + run filters + web run creation

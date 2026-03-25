@@ -3,10 +3,14 @@ import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { URL } from 'node:url';
+import { loadProvidersConfig } from '../config/loadProviders.js';
+import { runDuration } from './runDurationService.js';
+import { runOnce } from './runOnceService.js';
 import { getRunDetailFromSqlite, listRunsFromSqlite } from './sqliteStore.js';
 
 export interface UiServerOptions {
   dbPath: string;
+  configPath: string;
   host?: string;
   port?: number;
 }
@@ -35,9 +39,25 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
       const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '50', 10);
       const runs = await listRunsFromSqlite(options.dbPath, {
         limit: Number.isFinite(limit) ? limit : 50,
+        providerId: requestUrl.searchParams.get('provider') ?? undefined,
+        mode: (requestUrl.searchParams.get('mode') as 'once' | 'duration' | null) ?? undefined,
+        hasFailures:
+          requestUrl.searchParams.get('failures') === null
+            ? undefined
+            : ['yes', 'true', '1'].includes((requestUrl.searchParams.get('failures') ?? '').toLowerCase()),
+        createdAfter: requestUrl.searchParams.get('created_after') ?? undefined,
+        createdBefore: requestUrl.searchParams.get('created_before') ?? undefined,
+        query: requestUrl.searchParams.get('query') ?? undefined,
       });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ runs }, null, 2));
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/providers') {
+      const providersFile = await loadProvidersConfig(options.configPath);
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ providers: providersFile.providers }, null, 2));
       return;
     }
 
@@ -72,6 +92,50 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
 
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify(rawAttempt, null, 2));
+      return;
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/run') {
+      const payload = (await readJsonBody(request)) as {
+        mode: 'once' | 'duration';
+        providerIds: string[];
+        inputPath: string;
+        rounds?: number;
+        durationMs?: number;
+        concurrency?: number;
+        intervalMs?: number;
+        manifestPath?: string;
+        referenceSidecar?: boolean;
+        referenceDir?: string;
+      };
+
+      const summary =
+        payload.mode === 'duration'
+          ? await runDuration({
+              configPath: options.configPath,
+              providerIds: payload.providerIds,
+              inputPath: payload.inputPath,
+              durationMs: payload.durationMs ?? 30_000,
+              concurrency: payload.concurrency,
+              intervalMs: payload.intervalMs,
+              dbPath: options.dbPath,
+              manifestPath: payload.manifestPath,
+              referenceSidecar: payload.referenceSidecar,
+              referenceDir: payload.referenceDir,
+            })
+          : await runOnce({
+              configPath: options.configPath,
+              providerIds: payload.providerIds,
+              inputPath: payload.inputPath,
+              rounds: payload.rounds ?? 1,
+              dbPath: options.dbPath,
+              manifestPath: payload.manifestPath,
+              referenceSidecar: payload.referenceSidecar,
+              referenceDir: payload.referenceDir,
+            });
+
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ summary }, null, 2));
       return;
     }
 
@@ -383,6 +447,14 @@ function renderIndexHtml(): string {
       <aside class="sidebar">
         <h1>ASR Bench</h1>
         <p class="subtitle">SQLite-backed runs, latency, retries, transcript accuracy, and failure triage in one place.</p>
+        <div class="panel" style="margin-top:18px;">
+          <h3 style="margin-bottom:10px;">Run Filters</h3>
+          <div id="run-filter-controls" class="controls"></div>
+        </div>
+        <div class="panel" style="margin-top:16px;">
+          <h3 style="margin-bottom:10px;">Create Run</h3>
+          <div id="run-create-controls" class="controls"></div>
+        </div>
         <div id="run-list" class="run-list"></div>
       </aside>
       <main class="content" id="content">
@@ -392,9 +464,29 @@ function renderIndexHtml(): string {
     <script>
       const state = {
         runs: [],
+        providers: [],
         activeRunId: null,
         activeRun: null,
         rawAttemptById: {},
+        runFilters: {
+          provider: 'all',
+          mode: 'all',
+          failures: 'all',
+          query: '',
+        },
+        runForm: {
+          mode: 'once',
+          providerIds: [],
+          inputPath: '',
+          rounds: '1',
+          durationMs: '30000',
+          concurrency: '1',
+          intervalMs: '0',
+          manifestPath: '',
+          referenceSidecar: false,
+          referenceDir: '',
+        },
+        isSubmittingRun: false,
         filters: {
           provider: 'all',
           status: 'all',
@@ -447,10 +539,97 @@ function renderIndexHtml(): string {
         });
       }
 
+      function renderRunSidebarControls() {
+        renderRunFilterControls();
+        renderRunCreateControls();
+      }
+
+      function renderRunFilterControls() {
+        const root = document.getElementById('run-filter-controls');
+        if (!root) return;
+        const providers = state.providers.map((provider) => provider.provider_id);
+        root.innerHTML =
+          '<label>Provider<select id="run-filter-provider"><option value="all">All providers</option>' +
+          providers.map((provider) => '<option value="' + escapeHtml(provider) + '"' + (provider === state.runFilters.provider ? ' selected' : '') + '>' + escapeHtml(provider) + '</option>').join('') +
+          '</select></label>' +
+          '<label>Mode<select id="run-filter-mode">' +
+            '<option value="all"' + (state.runFilters.mode === 'all' ? ' selected' : '') + '>All modes</option>' +
+            '<option value="once"' + (state.runFilters.mode === 'once' ? ' selected' : '') + '>Once</option>' +
+            '<option value="duration"' + (state.runFilters.mode === 'duration' ? ' selected' : '') + '>Duration</option>' +
+          '</select></label>' +
+          '<label>Failures<select id="run-filter-failures">' +
+            '<option value="all"' + (state.runFilters.failures === 'all' ? ' selected' : '') + '>Any</option>' +
+            '<option value="yes"' + (state.runFilters.failures === 'yes' ? ' selected' : '') + '>Failures only</option>' +
+            '<option value="no"' + (state.runFilters.failures === 'no' ? ' selected' : '') + '>No failures</option>' +
+          '</select></label>' +
+          '<label>Search<input id="run-filter-query" type="text" placeholder="run id or path" value="' + escapeHtml(state.runFilters.query) + '" /></label>';
+
+        ['run-filter-provider', 'run-filter-mode', 'run-filter-failures', 'run-filter-query'].forEach((id) => {
+          const node = document.getElementById(id);
+          if (!node) return;
+          node.addEventListener('input', updateRunFiltersFromDom);
+          node.addEventListener('change', updateRunFiltersFromDom);
+        });
+      }
+
+      function renderRunCreateControls() {
+        const root = document.getElementById('run-create-controls');
+        if (!root) return;
+        const providerCheckboxes = state.providers.length
+          ? state.providers.map((provider) =>
+              '<label style="text-transform:none;letter-spacing:0;font-size:13px;">' +
+                '<input type="checkbox" class="run-provider-checkbox" value="' + escapeHtml(provider.provider_id) + '"' +
+                (state.runForm.providerIds.includes(provider.provider_id) ? ' checked' : '') +
+                ' /> ' + escapeHtml(provider.provider_id) +
+              '</label>'
+            ).join('')
+          : '<div class="muted">No providers loaded.</div>';
+
+        root.innerHTML =
+          '<label>Mode<select id="run-form-mode">' +
+            '<option value="once"' + (state.runForm.mode === 'once' ? ' selected' : '') + '>Once</option>' +
+            '<option value="duration"' + (state.runForm.mode === 'duration' ? ' selected' : '') + '>Duration</option>' +
+          '</select></label>' +
+          '<label>Input path<input id="run-form-input" type="text" placeholder="/path/to/audio" value="' + escapeHtml(state.runForm.inputPath) + '" /></label>' +
+          '<label>Manifest path<input id="run-form-manifest" type="text" placeholder="/path/to/manifest.json" value="' + escapeHtml(state.runForm.manifestPath) + '" /></label>' +
+          '<label>Reference dir<input id="run-form-reference-dir" type="text" placeholder="/path/to/references" value="' + escapeHtml(state.runForm.referenceDir) + '" /></label>' +
+          '<label>Rounds<input id="run-form-rounds" type="number" min="1" value="' + escapeHtml(state.runForm.rounds) + '" /></label>' +
+          '<label>Duration ms<input id="run-form-duration" type="number" min="1" value="' + escapeHtml(state.runForm.durationMs) + '" /></label>' +
+          '<label>Concurrency<input id="run-form-concurrency" type="number" min="1" value="' + escapeHtml(state.runForm.concurrency) + '" /></label>' +
+          '<label>Interval ms<input id="run-form-interval" type="number" min="0" value="' + escapeHtml(state.runForm.intervalMs) + '" /></label>' +
+          '<label style="text-transform:none;letter-spacing:0;font-size:13px;"><input id="run-form-sidecar" type="checkbox"' + (state.runForm.referenceSidecar ? ' checked' : '') + ' /> Use sidecar reference txt</label>' +
+          '<div style="display:grid;gap:6px;"><div class="muted" style="font-size:12px;">Providers</div>' + providerCheckboxes + '</div>' +
+          '<button id="run-form-submit" style="margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--accent);color:white;cursor:pointer;">' +
+            (state.isSubmittingRun ? 'Running...' : 'Start Run') +
+          '</button>';
+
+        ['run-form-mode', 'run-form-input', 'run-form-manifest', 'run-form-reference-dir', 'run-form-rounds', 'run-form-duration', 'run-form-concurrency', 'run-form-interval', 'run-form-sidecar']
+          .forEach((id) => {
+            const node = document.getElementById(id);
+            if (!node) return;
+            node.addEventListener('input', updateRunFormFromDom);
+            node.addEventListener('change', updateRunFormFromDom);
+          });
+        document.querySelectorAll('.run-provider-checkbox').forEach((node) => {
+          node.addEventListener('change', updateRunFormFromDom);
+        });
+        const submit = document.getElementById('run-form-submit');
+        if (submit) {
+          submit.addEventListener('click', submitRunForm);
+        }
+      }
+
       async function loadRuns() {
-        const response = await fetch('/api/runs');
+        const params = new URLSearchParams();
+        if (state.runFilters.provider !== 'all') params.set('provider', state.runFilters.provider);
+        if (state.runFilters.mode !== 'all') params.set('mode', state.runFilters.mode);
+        if (state.runFilters.failures !== 'all') params.set('failures', state.runFilters.failures);
+        if (state.runFilters.query) params.set('query', state.runFilters.query);
+
+        const response = await fetch('/api/runs?' + params.toString());
         const data = await response.json();
         state.runs = data.runs || [];
+        renderRunSidebarControls();
         state.activeRunId = state.runs[0] ? state.runs[0].run_id : null;
         renderRunList();
         if (state.activeRunId) {
@@ -458,6 +637,16 @@ function renderIndexHtml(): string {
         } else {
           document.getElementById('content').innerHTML = '<section class="panel empty">Run a benchmark first, then refresh this page.</section>';
         }
+      }
+
+      async function loadProviders() {
+        const response = await fetch('/api/providers');
+        const data = await response.json();
+        state.providers = data.providers || [];
+        if (!state.runForm.providerIds.length && state.providers[0]) {
+          state.runForm.providerIds = [state.providers[0].provider_id];
+        }
+        renderRunSidebarControls();
       }
 
       async function loadRun(runId) {
@@ -639,6 +828,75 @@ function renderIndexHtml(): string {
           node.addEventListener('input', updateFiltersFromDom);
           node.addEventListener('change', updateFiltersFromDom);
         });
+      }
+
+      async function updateRunFiltersFromDom() {
+        state.runFilters.provider = document.getElementById('run-filter-provider').value;
+        state.runFilters.mode = document.getElementById('run-filter-mode').value;
+        state.runFilters.failures = document.getElementById('run-filter-failures').value;
+        state.runFilters.query = document.getElementById('run-filter-query').value.trim();
+        await loadRuns();
+      }
+
+      function updateRunFormFromDom() {
+        state.runForm.mode = document.getElementById('run-form-mode').value;
+        state.runForm.inputPath = document.getElementById('run-form-input').value.trim();
+        state.runForm.manifestPath = document.getElementById('run-form-manifest').value.trim();
+        state.runForm.referenceDir = document.getElementById('run-form-reference-dir').value.trim();
+        state.runForm.rounds = document.getElementById('run-form-rounds').value.trim();
+        state.runForm.durationMs = document.getElementById('run-form-duration').value.trim();
+        state.runForm.concurrency = document.getElementById('run-form-concurrency').value.trim();
+        state.runForm.intervalMs = document.getElementById('run-form-interval').value.trim();
+        state.runForm.referenceSidecar = document.getElementById('run-form-sidecar').checked;
+        state.runForm.providerIds = Array.from(document.querySelectorAll('.run-provider-checkbox'))
+          .filter((node) => node.checked)
+          .map((node) => node.value);
+      }
+
+      async function submitRunForm() {
+        updateRunFormFromDom();
+        if (!state.runForm.inputPath || !state.runForm.providerIds.length) {
+          alert('Input path and at least one provider are required.');
+          return;
+        }
+
+        state.isSubmittingRun = true;
+        renderRunCreateControls();
+        try {
+          const payload = {
+            mode: state.runForm.mode,
+            providerIds: state.runForm.providerIds,
+            inputPath: state.runForm.inputPath,
+            rounds: Number.parseInt(state.runForm.rounds || '1', 10),
+            durationMs: Number.parseInt(state.runForm.durationMs || '30000', 10),
+            concurrency: Number.parseInt(state.runForm.concurrency || '1', 10),
+            intervalMs: Number.parseInt(state.runForm.intervalMs || '0', 10),
+            manifestPath: state.runForm.manifestPath || undefined,
+            referenceSidecar: state.runForm.referenceSidecar,
+            referenceDir: state.runForm.referenceDir || undefined,
+          };
+
+          const response = await fetch('/api/run', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data && data.error ? data.error : 'Run creation failed');
+          }
+          await loadRuns();
+          if (data.summary && data.summary.run_id) {
+            await loadRun(data.summary.run_id);
+          }
+        } catch (error) {
+          alert(error && error.message ? error.message : String(error));
+        } finally {
+          state.isSubmittingRun = false;
+          renderRunCreateControls();
+        }
       }
 
       function updateFiltersFromDom() {
@@ -865,7 +1123,7 @@ function renderIndexHtml(): string {
         }
       }
 
-      loadRuns().catch((error) => {
+      Promise.all([loadProviders(), loadRuns()]).catch((error) => {
         document.getElementById('content').innerHTML = '<section class="panel empty">Failed to load runs: ' + escapeHtml(error.message || String(error)) + '</section>';
       });
     </script>
@@ -881,4 +1139,13 @@ async function readRawAttemptArtifact(attemptsPath: string, attemptId: string): 
   } catch {
     return undefined;
   }
+}
+
+async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  return raw ? JSON.parse(raw) : {};
 }

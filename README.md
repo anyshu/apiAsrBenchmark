@@ -16,9 +16,10 @@ Current implementation includes:
 - `provider:list`, `provider:validate`, `run:once`, `run:duration`, `run:list`, `run:show`, `run:export`, and `ui:serve` CLI commands
 - JSONL / JSON / CSV artifact generation
 - SQLite run persistence
+- dataset manifest loading from `dataset.manifest.json`, `manifest.json`, or `--manifest`
 - sidecar or external reference transcript loading
 - WER / CER scoring
-- minimal local web dashboard over SQLite, with attempt filters and transcript diff
+- minimal local web dashboard over SQLite, with run filters, web run creation, attempt filters, and transcript diff
 
 ## Install
 
@@ -88,6 +89,16 @@ ZENMUX_API_KEY=... npm run cli -- \
   --rounds 3
 ```
 
+Attach dataset metadata and references from a manifest:
+
+```bash
+ZENMUX_API_KEY=... npm run cli -- \
+  --manifest /path/to/audio-dir/dataset.manifest.json \
+  run:once \
+  --providers zenmux-gemini-chat \
+  --input /path/to/audio-dir
+```
+
 Run a sustained benchmark with default global scheduling:
 
 ```bash
@@ -129,6 +140,8 @@ npm run cli -- --db artifacts/asrbench.sqlite ui:serve --port 3000
 ```
 
 The dashboard now supports:
+- run filtering by provider / mode / failures / search text
+- starting `run:once` or `run:duration` jobs from the browser
 - provider / status / text filters
 - min latency / min WER thresholds
 - sorting by latency / WER / retries / recency
@@ -183,6 +196,28 @@ Each run still writes file artifacts under `artifacts/runs/<run-id>/`:
 In addition, summaries and attempts are persisted into SQLite, defaulting to:
 - `/Users/hc/working/github/audioApibench/artifacts/asrbench.sqlite`
 
+Optional dataset manifest format:
+
+```json
+{
+  "items": [
+    {
+      "path": "speaker-a.wav",
+      "reference_text": "optional inline transcript",
+      "reference_path": "../refs/speaker-a.txt",
+      "language": "zh",
+      "speaker": "speaker-a",
+      "tags": ["meeting", "far-field"]
+    }
+  ]
+}
+```
+
+Notes:
+- `path` can be an audio path relative to the input root, or just a filename
+- manifest metadata is applied before sidecar / `--reference-dir`, so those sources can still fill missing references
+- `reference_path` is resolved relative to the manifest file location
+
 ## Metrics
 
 Per attempt:
@@ -207,3 +242,4 @@ Per run and per provider:
 - provider-level `runner_options` override CLI defaults during `run:duration`
 - retry policy uses exponential backoff from `retry_policy.backoff_ms`
 - ZenMux is modeled as an independent provider type, not only as a generic OpenAI-compatible endpoint
+- the local UI uses `GET /api/providers`, `GET /api/runs`, `GET /api/runs/:run_id`, `GET /api/runs/:run_id/attempts/:attempt_id/raw`, and `POST /api/run`

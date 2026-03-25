@@ -70,6 +70,9 @@ interface AudioAsset {
   format: string;
   size_bytes: number;
   duration_ms?: number;
+  language?: string;
+  speaker?: string;
+  tags?: string[];
   reference_text?: string;
   reference_path?: string;
 }
@@ -214,19 +217,64 @@ asrbench --db artifacts/asrbench.sqlite ui:serve --port 3000
 全局 CLI 选项：
 - `--config`
 - `--db`
+- `--manifest`
 - `--reference-sidecar`
 - `--reference-dir`
 
 ## 7. 本地 UI API
 
 ```http
+GET /api/providers
 GET /api/runs
 GET /api/runs/:run_id
 GET /api/runs/:run_id/attempts/:attempt_id/raw
+POST /api/run
 GET /
 ```
 
 说明：
+- `/api/providers` 返回已加载的 provider 配置摘要，用于 UI 选择
 - `/api/runs` 返回 run summary 列表
+- `/api/runs` 支持 `provider`、`mode`、`failures`、`created_after`、`created_before`、`query`
 - `/api/runs/:run_id` 返回 summary + attempts
+- `/api/run` 支持直接触发 `run:once` / `run:duration`
 - `/` 返回最小 dashboard 页面
+
+### 7.1 Dataset Manifest
+
+```json
+{
+  "items": [
+    {
+      "path": "speaker-a.wav",
+      "reference_text": "optional inline transcript",
+      "reference_path": "../refs/speaker-a.txt",
+      "language": "zh",
+      "speaker": "speaker-a",
+      "tags": ["meeting", "far-field"]
+    }
+  ]
+}
+```
+
+规则：
+- `path` 优先按输入根目录相对路径匹配，回退到文件名匹配
+- `reference_path` 相对 manifest 文件解析
+- manifest 先于 sidecar / reference-dir 执行，后两者仅补齐缺失 reference
+
+### 7.2 `POST /api/run` 请求体
+
+```json
+{
+  "mode": "once",
+  "providerIds": ["openai-whisper"],
+  "inputPath": "/path/to/audio",
+  "rounds": 1,
+  "durationMs": 30000,
+  "concurrency": 1,
+  "intervalMs": 0,
+  "manifestPath": "/path/to/audio/dataset.manifest.json",
+  "referenceSidecar": false,
+  "referenceDir": "/path/to/references"
+}
+```

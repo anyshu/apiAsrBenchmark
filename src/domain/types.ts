@@ -85,6 +85,9 @@ export interface AudioAsset {
   format: string;
   size_bytes: number;
   duration_ms?: number;
+  language?: string;
+  speaker?: string;
+  tags?: string[];
   reference_text?: string;
   reference_path?: string;
 }

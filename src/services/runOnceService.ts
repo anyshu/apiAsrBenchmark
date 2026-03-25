@@ -6,6 +6,7 @@ import { loadProvidersConfig, resolveProviderSecrets } from '../config/loadProvi
 import { DefaultProviderSwitcher } from '../providers/switcher.js';
 import { collectAudioAssets } from '../utils/audio.js';
 import { createAttemptRecord, finalizeRunArtifacts, writeRawAttemptArtifact } from './benchmarkArtifacts.js';
+import { applyDatasetManifest } from './datasetManifest.js';
 import { executeWithRetry } from './providerExecution.js';
 import { attachReferenceTexts, evaluateTranscript } from './references.js';
 
@@ -16,6 +17,7 @@ export interface RunOnceOptions {
   rounds?: number;
   outputRoot?: string;
   dbPath?: string;
+  manifestPath?: string;
   referenceSidecar?: boolean;
   referenceDir?: string;
 }
@@ -39,7 +41,11 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
   }
 
   const providers = selectedProviders.map((provider) => resolveProviderSecrets(provider));
-  const audioAssets = await attachReferenceTexts(await collectAudioAssets(options.inputPath), {
+  const catalogedAudioAssets = await applyDatasetManifest(await collectAudioAssets(options.inputPath), {
+    inputPath: options.inputPath,
+    manifestPath: options.manifestPath,
+  });
+  const audioAssets = await attachReferenceTexts(catalogedAudioAssets, {
     inputPath: options.inputPath,
     sidecar: options.referenceSidecar,
     referenceDir: options.referenceDir,
