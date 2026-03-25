@@ -286,6 +286,51 @@ function renderIndexHtml(): string {
         font-size: 12px;
       }
 
+      .chart-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .chart {
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.72);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .chart-title {
+        margin-bottom: 10px;
+        font-size: 14px;
+      }
+
+      .bar-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .bar-row {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr) 52px;
+        gap: 10px;
+        align-items: center;
+        font-size: 12px;
+      }
+
+      .bar-track {
+        position: relative;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(29, 27, 23, 0.08);
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(13,122,95,0.82), rgba(217,108,61,0.82));
+      }
+
       .diff-chip {
         display: inline-block;
         margin: 0 4px 4px 0;
@@ -440,6 +485,10 @@ function renderIndexHtml(): string {
             renderProviderTable(summary.provider_summaries || []) +
           '</section>' +
           '<section class="panel">' +
+            '<h3 style="margin-bottom:12px;">Visual Overview</h3>' +
+            renderCharts(attempts) +
+          '</section>' +
+          '<section class="panel">' +
             '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">' +
               '<div><h3 style="margin-bottom:6px;">Attempts</h3><p class="muted" style="margin:0;">Filter failures, high latency, high WER, and inspect one sample in detail.</p></div>' +
             '</div>' +
@@ -459,6 +508,68 @@ function renderIndexHtml(): string {
         return '<table><thead><tr><th>provider</th><th>attempts</th><th>avg latency</th><th>retries</th><th>avg WER</th><th>avg CER</th></tr></thead><tbody>' +
           rows.map((row) => '<tr><td>' + escapeHtml(row.provider_id) + '</td><td>' + row.attempt_count + '</td><td>' + fmt(row.average_latency_ms) + '</td><td>' + fmt(row.total_retry_count) + '</td><td>' + fmt(row.average_wer) + '</td><td>' + fmt(row.average_cer) + '</td></tr>').join('') +
           '</tbody></table>';
+      }
+
+      function renderCharts(rows) {
+        if (!rows.length) {
+          return '<div class="empty">No attempts available for charting.</div>';
+        }
+
+        const latencyBuckets = [
+          ['<250ms', (row) => Number(row.latency_ms) < 250],
+          ['250-500', (row) => Number(row.latency_ms) >= 250 && Number(row.latency_ms) < 500],
+          ['500-1000', (row) => Number(row.latency_ms) >= 500 && Number(row.latency_ms) < 1000],
+          ['1-2s', (row) => Number(row.latency_ms) >= 1000 && Number(row.latency_ms) < 2000],
+          ['>2s', (row) => Number(row.latency_ms) >= 2000],
+        ];
+        const werBuckets = [
+          ['0-0.1', (row) => (row.evaluation?.word_error_rate ?? -1) >= 0 && (row.evaluation?.word_error_rate ?? -1) < 0.1],
+          ['0.1-0.2', (row) => (row.evaluation?.word_error_rate ?? -1) >= 0.1 && (row.evaluation?.word_error_rate ?? -1) < 0.2],
+          ['0.2-0.4', (row) => (row.evaluation?.word_error_rate ?? -1) >= 0.2 && (row.evaluation?.word_error_rate ?? -1) < 0.4],
+          ['0.4-0.6', (row) => (row.evaluation?.word_error_rate ?? -1) >= 0.4 && (row.evaluation?.word_error_rate ?? -1) < 0.6],
+          ['>0.6', (row) => (row.evaluation?.word_error_rate ?? -1) >= 0.6],
+        ];
+
+        const failureCounts = Object.entries(
+          rows.reduce((acc, row) => {
+            if (!row.success) {
+              const key = row.error?.type || 'failed';
+              acc[key] = (acc[key] || 0) + 1;
+            }
+            return acc;
+          }, {}),
+        );
+
+        return '<div class="chart-stack">' +
+          renderBarChart('Latency Distribution', bucketCounts(rows, latencyBuckets)) +
+          renderBarChart('WER Distribution', bucketCounts(rows.filter((row) => row.evaluation), werBuckets)) +
+          renderBarChart('Failure Types', failureCounts) +
+        '</div>';
+      }
+
+      function bucketCounts(rows, buckets) {
+        return buckets.map(([label, predicate]) => [label, rows.filter(predicate).length]);
+      }
+
+      function renderBarChart(title, rows) {
+        const filtered = rows.filter(([, value]) => value > 0);
+        if (!filtered.length) {
+          return '<div class="chart"><div class="chart-title">' + title + '</div><div class="muted">No data in this slice.</div></div>';
+        }
+        const maxValue = Math.max(...filtered.map(([, value]) => value), 1);
+        return '<div class="chart">' +
+          '<div class="chart-title">' + title + '</div>' +
+          '<div class="bar-list">' +
+            filtered.map(([label, value]) => {
+              const pct = Math.max(4, Math.round((value / maxValue) * 100));
+              return '<div class="bar-row">' +
+                '<div>' + escapeHtml(label) + '</div>' +
+                '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;"></div></div>' +
+                '<div>' + value + '</div>' +
+              '</div>';
+            }).join('') +
+          '</div>' +
+        '</div>';
       }
 
       function renderAttemptFilters(rows) {

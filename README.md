@@ -132,6 +132,7 @@ The dashboard now supports:
 - provider / status / text filters
 - min latency / min WER thresholds
 - sorting by latency / WER / retries / recency
+- built-in latency / WER / failure bar charts
 - failure diagnostics on the selected attempt
 - side-by-side reference vs hypothesis diff chips
 

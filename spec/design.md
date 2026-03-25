@@ -89,6 +89,7 @@ SQLite 的作用：
 - `GET /api/runs/:run_id`
 - `/` 返回静态 HTML + JS 页面
 - 页面支持 attempt 筛选、失败诊断、reference/hypothesis diff
+- 页面基于当前 run 数据做轻量级条形图，不依赖前端图表库
 
 ## 4. 运行流程
 

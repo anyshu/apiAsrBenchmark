@@ -24,6 +24,7 @@
 ### 主内容区
 - Run 概览卡片
 - Provider Summary 表格
+- latency / WER / failure 可视化卡片
 - Attempt 列表表格
 - Attempt detail / transcript diff 侧栏
 
@@ -55,6 +56,7 @@
 4. 点击左侧 run 卡片切换详情
 5. 在 attempt 面板按 provider / status / WER / latency 过滤
 6. 点击某个 attempt 查看 failure diagnostics 和 transcript diff
+7. 通过图表快速判断延迟分布、质量分布和失败类型
 
 ## 7. 后续演进方向
 
