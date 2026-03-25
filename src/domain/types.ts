@@ -1,4 +1,4 @@
-export type ProviderType = 'openai_compatible' | 'zenmux' | 'custom_http';
+export type ProviderType = 'openai_compatible' | 'zenmux' | 'openrouter' | 'custom_http';
 export type OpenAICompatibleOperation =
   | 'audio_transcriptions'
   | 'chat_completions_audio'
@@ -19,6 +19,10 @@ export interface OpenAICompatibleAdapterOptions {
   transcription_path?: string;
   chat_path?: string;
   responses_path?: string;
+  chat_audio_part_type?: 'input_audio' | 'inputAudio';
+  chat_audio_input_key?: 'input_audio' | 'inputAudio';
+  responses_audio_part_type?: 'input_audio' | 'inputAudio';
+  responses_audio_input_key?: 'input_audio' | 'inputAudio';
   file_field_name?: string;
   model_field_name?: string;
   prompt_field_name?: string;

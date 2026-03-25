@@ -1,6 +1,7 @@
 import type { AsrProviderAdapter, ProviderConfig, ProviderSwitcher } from '../domain/types.js';
 import { CustomHttpAdapter } from './customHttpAdapter.js';
 import { OpenAICompatibleAdapter } from './openaiCompatibleAdapter.js';
+import { OpenRouterAdapter } from './openRouterAdapter.js';
 import { ZenMuxAdapter } from './zenmuxAdapter.js';
 
 export class DefaultProviderSwitcher implements ProviderSwitcher {
@@ -10,6 +11,8 @@ export class DefaultProviderSwitcher implements ProviderSwitcher {
         return new OpenAICompatibleAdapter();
       case 'zenmux':
         return new ZenMuxAdapter();
+      case 'openrouter':
+        return new OpenRouterAdapter();
       case 'custom_http':
         return new CustomHttpAdapter();
       default:

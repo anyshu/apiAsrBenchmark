@@ -29,7 +29,7 @@
 - 系统应支持加载单文件或整个 provider 目录
 
 ### FR-2 Provider 扩展能力
-- 第一阶段至少支持 `openai_compatible`、`zenmux`、`custom_http`
+- 第一阶段至少支持 `openai_compatible`、`zenmux`、`openrouter`、`custom_http`
 - 系统应通过 provider switcher 在运行时选择正确 adapter
 - ZenMux 这类 provider 可以复用部分 OpenAI 风格构造能力，但设计上仍然应作为独立 provider type
 
@@ -111,7 +111,7 @@
 
 当前代码已覆盖：
 - provider 独立配置文件
-- `openai_compatible` / `zenmux` / `custom_http`
+- `openai_compatible` / `zenmux` / `openrouter` / `custom_http`
 - provider switcher
 - `run:once` / `run:duration`
 - provider 级别调度覆盖

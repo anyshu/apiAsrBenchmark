@@ -90,6 +90,7 @@
 系统第一阶段至少支持三类 provider：
 - `openai_compatible`：面向 OpenAI 风格转写接口
 - `zenmux`：面向 ZenMux 的 provider-specific 路由实现
+- `openrouter`：面向 OpenRouter 这类聚合层的 provider-specific 路由实现，允许按聚合平台可用模型和最佳音频入口做独立收敛
 - `custom_http`：面向完全自定义 HTTP 接口
 
 这样可以满足两种情况：
@@ -327,6 +328,7 @@ providers/
   openai-whisper.yaml
   zenmux-gemini-chat.yaml
   zenmux-mimo-chat.yaml
+  openrouter-mimo-omni.yaml
 ```
 
 即一份 provider 一个配置文件，这样新增 provider 时不需要修改代码，也不需要修改一个集中式大配置文件。
@@ -893,6 +895,7 @@ UI 主要解决三个问题：
 - 配置加载
 - `openai_compatible` adapter
 - `zenmux` provider
+- `openrouter` provider
 - `Provider Switcher`
 - `custom_http` adapter
 - 音频扫描与 manifest

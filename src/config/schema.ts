@@ -41,7 +41,7 @@ const runnerOptionsSchema = z.object({
 export const providerConfigSchema = z.object({
   provider_id: z.string().min(1),
   name: z.string().min(1),
-  type: z.enum(['openai_compatible', 'zenmux', 'custom_http']),
+  type: z.enum(['openai_compatible', 'zenmux', 'openrouter', 'custom_http']),
   base_url: z.url(),
   api_key: z.string().min(1).optional(),
   api_key_env: z.string().min(1).optional(),

@@ -9,6 +9,7 @@ Current implementation includes:
 - provider config loader (single file or provider directory)
 - `openai_compatible` adapter
 - `zenmux` adapter
+- `openrouter` adapter
 - `custom_http` adapter
 - provider switcher for runtime routing
 - `audio_transcriptions`, `chat_completions_audio`, and `responses_audio` request shapes
@@ -34,6 +35,7 @@ Providers live as independent config files under `/Users/hc/working/github/audio
 Current examples:
 - `/Users/hc/working/github/audioApibench/providers/custom-http-example.yaml`
 - `/Users/hc/working/github/audioApibench/providers/openai-whisper.yaml`
+- `/Users/hc/working/github/audioApibench/providers/openrouter-mimo-omni.yaml`
 - `/Users/hc/working/github/audioApibench/providers/zenmux-gemini-chat.yaml`
 - `/Users/hc/working/github/audioApibench/providers/zenmux-mimo-chat.yaml`
 
@@ -61,12 +63,35 @@ adapter_options:
 
 This layout keeps provider onboarding config-driven: new providers usually require a new YAML file, not code edits.
 
+OpenRouter is wired as a dedicated provider type because, like ZenMux, it is an aggregation layer where the practical audio entrypoint is the chat-completions audio shape instead of `/audio/transcriptions`.
+The adapter now defaults to the OpenRouter-docs-style audio payload (`type: input_audio` + `inputAudio`) and will automatically retry once with the legacy snake_case payload key (`input_audio`) when the first shape is rejected or clearly ignored.
+
+As of 2026-03-25, live OpenRouter checks from this repo showed:
+- `xiaomi/mimo-v2-omni` was the most usable region-available default for this workspace
+- `openai/gpt-audio-mini`, `openai/gpt-audio`, and Gemini audio models returned regional availability errors
+- `mistralai/voxtral-small-24b-2507` accepted requests but did not reliably consume the attached audio in our transcription prompt tests
+
 ## CLI usage
 
 List providers:
 
 ```bash
 ZENMUX_API_KEY=... OPENAI_API_KEY=... npm run cli -- provider:list
+```
+
+Validate the OpenRouter preset:
+
+```bash
+OPENROUTER_API_KEY=... npm run cli -- provider:validate \
+  --provider openrouter-mimo-omni \
+  --audio test/fixtures/sample.wav \
+  --dry-run
+```
+
+Run the OpenRouter smoke script:
+
+```bash
+OPENROUTER_API_KEY=... ./scripts/smoke-openrouter-demo.sh
 ```
 
 Dry-run validate one provider:
@@ -230,6 +255,7 @@ For a quick smoke test, the repo includes:
 - `/Users/hc/working/github/audioApibench/examples/demo-dataset`
 - `/Users/hc/working/github/audioApibench/examples/demo-provider`
 - `/Users/hc/working/github/audioApibench/scripts/smoke-openai-demo.sh`
+- `/Users/hc/working/github/audioApibench/scripts/smoke-openrouter-demo.sh`
 - `/Users/hc/working/github/audioApibench/scripts/smoke-zenmux-demo.sh`
 
 Smoke scripts now:

@@ -1,0 +1,17 @@
+provider_id: openrouter-demo
+name: OpenRouter Demo
+type: openrouter
+base_url: https://openrouter.ai/api/v1
+api_key_env: OPENROUTER_API_KEY
+default_model: xiaomi/mimo-v2-omni
+retry_policy:
+  max_attempts: 2
+  backoff_ms: 500
+runner_options:
+  concurrency: 1
+  interval_ms: 200
+adapter_options:
+  operation: chat_completions_audio
+  chat_path: /chat/completions
+  text_prompt: Please transcribe this audio faithfully. Return plain text only.
+  audio_format: wav

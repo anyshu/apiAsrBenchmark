@@ -24,6 +24,21 @@ function resolveModel(provider: ProviderConfig, input: ProviderRequestInput): st
   return input.model ?? provider.default_model ?? 'gpt-4o-mini-transcribe';
 }
 
+function createAudioContentPart(
+  partType: 'input_audio' | 'inputAudio',
+  inputKey: 'input_audio' | 'inputAudio',
+  data: string,
+  format: string,
+): Record<string, unknown> {
+  return {
+    type: partType,
+    [inputKey]: {
+      data,
+      format,
+    },
+  };
+}
+
 function joinUrl(baseUrl: string, route: string): string {
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
   const normalizedRoute = route.replace(/^\/+/, '');
@@ -142,6 +157,8 @@ export class OpenAICompatibleAdapter implements AsrProviderAdapter {
     const promptText = input.prompt ?? options.text_prompt ?? 'Please transcribe this audio.';
 
     if (operation === 'chat_completions_audio') {
+      const audioPartType = options.chat_audio_part_type ?? 'input_audio';
+      const audioInputKey = options.chat_audio_input_key ?? 'input_audio';
       const payload = {
         model,
         messages: [
@@ -149,13 +166,7 @@ export class OpenAICompatibleAdapter implements AsrProviderAdapter {
             role: 'user',
             content: [
               { type: 'text', text: promptText },
-              {
-                type: 'input_audio',
-                input_audio: {
-                  data: audioBase64,
-                  format: audioFormat,
-                },
-              },
+              createAudioContentPart(audioPartType, audioInputKey, audioBase64, audioFormat),
             ],
           },
         ],
@@ -180,11 +191,17 @@ export class OpenAICompatibleAdapter implements AsrProviderAdapter {
             base64_bytes: audioBase64.length,
           },
           prompt: promptText,
+          audio_shape: {
+            part_type: audioPartType,
+            input_key: audioInputKey,
+          },
           headers: redactHeaders(headers),
         },
       };
     }
 
+    const audioPartType = options.responses_audio_part_type ?? 'input_audio';
+    const audioInputKey = options.responses_audio_input_key ?? 'input_audio';
     const payload = {
       model,
       input: [
@@ -192,13 +209,7 @@ export class OpenAICompatibleAdapter implements AsrProviderAdapter {
           role: 'user',
           content: [
             { type: 'input_text', text: promptText },
-            {
-              type: 'input_audio',
-              input_audio: {
-                data: audioBase64,
-                format: audioFormat,
-              },
-            },
+            createAudioContentPart(audioPartType, audioInputKey, audioBase64, audioFormat),
           ],
         },
       ],
@@ -223,6 +234,10 @@ export class OpenAICompatibleAdapter implements AsrProviderAdapter {
           base64_bytes: audioBase64.length,
         },
         prompt: promptText,
+        audio_shape: {
+          part_type: audioPartType,
+          input_key: audioInputKey,
+        },
         headers: redactHeaders(headers),
       },
     };

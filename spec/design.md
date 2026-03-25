@@ -45,7 +45,9 @@
 - 加载 provider 独立配置文件
 - 做 `provider_id` 去重校验
 - 根据 `provider.type` 选择正确 adapter
-- 对 `openai_compatible`、`zenmux`、`custom_http` 做运行时路由
+- 对 `openai_compatible`、`zenmux`、`openrouter`、`custom_http` 做运行时路由
+- `openrouter` 允许在 adapter 内部收敛“当前 region 下可用模型”和“最稳定的音频入口”这类聚合平台差异
+- `openrouter` adapter 可以在同一逻辑下兼容多种音频 content part 形态，并在必要时做一次 provider 内部回退
 
 ### Audio Catalog
 - 扫描输入目录

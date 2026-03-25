@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DefaultProviderSwitcher } from '../src/providers/switcher.js';
 import { CustomHttpAdapter } from '../src/providers/customHttpAdapter.js';
 import { OpenAICompatibleAdapter } from '../src/providers/openaiCompatibleAdapter.js';
+import { OpenRouterAdapter } from '../src/providers/openRouterAdapter.js';
 import { ZenMuxAdapter } from '../src/providers/zenmuxAdapter.js';
 import type { ProviderConfig } from '../src/domain/types.js';
 
@@ -28,6 +29,18 @@ test('routes zenmux providers to the dedicated ZenMux adapter', () => {
 
   const adapter = new DefaultProviderSwitcher().resolve(provider);
   assert.ok(adapter instanceof ZenMuxAdapter);
+});
+
+test('routes openrouter providers to the dedicated OpenRouter adapter', () => {
+  const provider: ProviderConfig = {
+    provider_id: 'openrouter-mimo-omni',
+    name: 'OpenRouter MiMo Omni Audio Chat',
+    type: 'openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+  };
+
+  const adapter = new DefaultProviderSwitcher().resolve(provider);
+  assert.ok(adapter instanceof OpenRouterAdapter);
 });
 
 test('routes custom_http providers to the custom HTTP adapter', () => {

@@ -559,7 +559,7 @@ function listRunJobs(runJobs: Map<string, UiRunJob>, limit: number): UiRunJob[] 
 function describeProviderCapabilities(provider: ProviderConfig): Record<string, unknown> {
   const adapterOptions = (provider.adapter_options ?? {}) as Record<string, unknown>;
   const operation =
-    provider.type === 'zenmux'
+    provider.type === 'zenmux' || provider.type === 'openrouter'
       ? 'chat_completions_audio'
       : typeof adapterOptions.operation === 'string'
         ? adapterOptions.operation

@@ -51,7 +51,7 @@ interface ProviderRunnerOptions {
 interface ProviderConfig {
   provider_id: string;
   name: string;
-  type: 'openai_compatible' | 'zenmux' | 'custom_http';
+  type: 'openai_compatible' | 'zenmux' | 'openrouter' | 'custom_http';
   base_url: string;
   api_key?: string;
   api_key_env?: string;
