@@ -92,6 +92,8 @@
 - Web UI attempt 详情应展示 manifest metadata
 - Web UI 应支持取消 queued / running 的浏览器任务
 - Web UI 可快捷填充 demo dataset / demo provider，降低 smoke test 成本
+- Web UI 应支持下载当前 run 的 `json` / `jsonl` / `csv`
+- Web UI 应展示 provider capability 摘要，帮助区分 operation / timestamp 能力
 - 将来替换成其他 UI 形态时，不应修改 benchmark 内核
 
 ## 5. 非功能需求
@@ -121,3 +123,4 @@
 - 最小本地 Web UI + run filters + async web run creation
 - demo dataset + demo provider config
 - real-provider smoke scripts
+- smoke outputs with structured logs

@@ -6,8 +6,10 @@ import type { AddressInfo } from 'node:net';
 import { URL } from 'node:url';
 import type { BenchRunSummary } from '../domain/types.js';
 import { loadProvidersConfig } from '../config/loadProviders.js';
+import type { ProviderConfig } from '../domain/types.js';
 import { runDuration } from './runDurationService.js';
 import { runOnce } from './runOnceService.js';
+import { exportRun } from './runQueryService.js';
 import { getRunDetailFromSqlite, listRunsFromSqlite } from './sqliteStore.js';
 
 export interface UiServerOptions {
@@ -74,6 +76,16 @@ export interface UiRunJob {
     current_provider_id?: string;
     current_audio_id?: string;
     message?: string;
+    retry_history?: Array<{
+      attempt: number;
+      statusCode?: number;
+      error?: {
+        type?: string;
+        message?: string;
+      };
+      startedAt: string;
+      finishedAt: string;
+    }>;
   };
   request: RunSubmission;
   summary?: BenchRunSummary;
@@ -121,6 +133,21 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
         const providersFile = await loadProvidersConfig(options.configPath);
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ providers: providersFile.providers }, null, 2));
+        return;
+      }
+
+      if (requestUrl.pathname === '/api/provider-capabilities') {
+        const providersFile = await loadProvidersConfig(options.configPath);
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(
+          JSON.stringify(
+            {
+              providers: providersFile.providers.map((provider) => describeProviderCapabilities(provider)),
+            },
+            null,
+            2,
+          ),
+        );
         return;
       }
 
@@ -223,6 +250,30 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
 
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify(rawAttempt, null, 2));
+        return;
+      }
+
+      const exportMatch = requestUrl.pathname.match(/^\/api\/runs\/([^/]+)\/export$/);
+      if (exportMatch) {
+        const runId = decodeURIComponent(exportMatch[1]);
+        const formatParam = requestUrl.searchParams.get('format') ?? 'json';
+        const format = ['json', 'jsonl', 'csv'].includes(formatParam) ? (formatParam as 'json' | 'jsonl' | 'csv') : 'json';
+        const exported = await exportRun({
+          dbPath: options.dbPath,
+          runId,
+          format,
+        });
+        const contentType =
+          format === 'csv'
+            ? 'text/csv; charset=utf-8'
+            : format === 'jsonl'
+              ? 'application/x-ndjson; charset=utf-8'
+              : 'application/json; charset=utf-8';
+        response.writeHead(200, {
+          'content-type': contentType,
+          'content-disposition': `attachment; filename="${runId}.${format}"`,
+        });
+        response.end(exported.content);
         return;
       }
 
@@ -417,7 +468,7 @@ export async function executeRunJob(
             referenceSidecar: job.request.referenceSidecar,
             referenceDir: job.request.referenceDir,
             shouldStop: () => Boolean(job.cancel_requested),
-            onAttemptComplete: ({ attempt, completedAttempts, elapsedMs, durationMs }) => {
+            onAttemptComplete: ({ attempt, completedAttempts, elapsedMs, durationMs, retryHistory }) => {
               job.progress = {
                 completed_attempts: completedAttempts,
                 elapsed_ms: elapsedMs,
@@ -426,6 +477,7 @@ export async function executeRunJob(
                 current_attempt_id: attempt.attempt_id,
                 current_provider_id: attempt.provider_id,
                 current_audio_id: attempt.audio_id,
+                retry_history: retryHistory,
                 message: job.cancel_requested ? 'Cancelling after current attempt...' : 'Running duration benchmark.',
               };
               runJobs.set(job.job_id, job);
@@ -441,7 +493,7 @@ export async function executeRunJob(
             referenceSidecar: job.request.referenceSidecar,
             referenceDir: job.request.referenceDir,
             shouldStop: () => Boolean(job.cancel_requested),
-            onAttemptComplete: ({ attempt, completedAttempts, totalAttempts }) => {
+            onAttemptComplete: ({ attempt, completedAttempts, totalAttempts, retryHistory }) => {
               job.progress = {
                 completed_attempts: completedAttempts,
                 total_attempts: totalAttempts,
@@ -449,6 +501,7 @@ export async function executeRunJob(
                 current_attempt_id: attempt.attempt_id,
                 current_provider_id: attempt.provider_id,
                 current_audio_id: attempt.audio_id,
+                retry_history: retryHistory,
                 message: job.cancel_requested ? 'Cancelling after current attempt...' : 'Running once benchmark.',
               };
               runJobs.set(job.job_id, job);
@@ -501,6 +554,35 @@ function listRunJobs(runJobs: Map<string, UiRunJob>, limit: number): UiRunJob[] 
   return Array.from(runJobs.values())
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
     .slice(0, Math.max(1, limit));
+}
+
+function describeProviderCapabilities(provider: ProviderConfig): Record<string, unknown> {
+  const adapterOptions = (provider.adapter_options ?? {}) as Record<string, unknown>;
+  const operation =
+    provider.type === 'zenmux'
+      ? 'chat_completions_audio'
+      : typeof adapterOptions.operation === 'string'
+        ? adapterOptions.operation
+        : provider.type === 'openai_compatible'
+          ? 'audio_transcriptions'
+          : 'custom_http';
+
+  return {
+    provider_id: provider.provider_id,
+    name: provider.name,
+    type: provider.type,
+    operation,
+    base_url: provider.base_url,
+    default_model: provider.default_model,
+    supports_audio_input: true,
+    supports_word_timestamps:
+      provider.type === 'openai_compatible' && operation === 'audio_transcriptions',
+    supports_segment_timestamps:
+      provider.type === 'openai_compatible' && operation === 'audio_transcriptions',
+    supports_background_benchmarking: true,
+    retry_policy: provider.retry_policy ?? {},
+    runner_options: provider.runner_options ?? {},
+  };
 }
 
 function toPositiveInteger(value: unknown, fallback: number): number {
@@ -813,6 +895,10 @@ function renderIndexHtml(): string {
           <h3 style="margin-bottom:10px;">Background Jobs</h3>
           <div id="job-list"></div>
         </div>
+        <div class="panel" style="margin-top:16px;">
+          <h3 style="margin-bottom:10px;">Providers</h3>
+          <div id="provider-capabilities"></div>
+        </div>
         <div id="run-list" class="run-list"></div>
       </aside>
       <main class="content" id="content">
@@ -823,6 +909,7 @@ function renderIndexHtml(): string {
       const state = {
         runs: [],
         providers: [],
+        providerCapabilities: [],
         jobs: [],
         demoAssets: null,
         activeRunId: null,
@@ -906,6 +993,26 @@ function renderIndexHtml(): string {
         renderRunFilterControls();
         renderRunCreateControls();
         renderJobList();
+        renderProviderCapabilities();
+      }
+
+      function renderProviderCapabilities() {
+        const root = document.getElementById('provider-capabilities');
+        if (!root) return;
+        if (!state.providerCapabilities.length) {
+          root.innerHTML = '<div class="muted">No provider capability data loaded.</div>';
+          return;
+        }
+
+        root.innerHTML = state.providerCapabilities.map((item) =>
+          '<div class="run-card">' +
+            '<div class="tag">' + escapeHtml(item.type) + '</div>' +
+            '<div class="tag">' + escapeHtml(item.operation) + '</div>' +
+            '<h3 style="margin-top:10px;font-size:15px;">' + escapeHtml(item.provider_id) + '</h3>' +
+            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(item.default_model || 'no default model') + '</p>' +
+            '<p class="muted" style="margin:8px 0 0;">timestamps: ' + ((item.supports_word_timestamps || item.supports_segment_timestamps) ? 'yes' : 'no') + '</p>' +
+          '</div>'
+        ).join('');
       }
 
       function renderRunFilterControls() {
@@ -1044,6 +1151,9 @@ function renderIndexHtml(): string {
               '<div class="bar-track" style="height:8px;"><div class="bar-fill" style="width:' + Math.round(ratio * 100) + '%;"></div></div>' +
               '<p class="muted" style="margin:6px 0 0;">' + escapeHtml(progress.message || progressLabel) + '</p>' +
               '<p class="muted" style="margin:4px 0 0;">' + escapeHtml(progressLabel) + '</p>' +
+              (progress.retry_history && progress.retry_history.length
+                ? '<pre style="margin-top:8px;font-size:11px;">' + escapeHtml(JSON.stringify(progress.retry_history, null, 2)) + '</pre>'
+                : '') +
             '</div>';
           return '<div class="run-card">' +
             statusTag +
@@ -1106,6 +1216,13 @@ function renderIndexHtml(): string {
         renderRunSidebarControls();
       }
 
+      async function loadProviderCapabilities() {
+        const response = await fetch('/api/provider-capabilities');
+        const data = await response.json();
+        state.providerCapabilities = data.providers || [];
+        renderProviderCapabilities();
+      }
+
       async function loadDemoAssets() {
         const response = await fetch('/api/demo-assets');
         const data = await response.json();
@@ -1165,6 +1282,15 @@ function renderIndexHtml(): string {
         }
       }
 
+      function renderRunExportButtons(runId) {
+        const formats = ['json', 'jsonl', 'csv'];
+        return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">' +
+          formats.map((format) =>
+            '<button class="run-export-button" data-run-id="' + escapeHtml(runId) + '" data-format="' + format + '" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Download ' + format.toUpperCase() + '</button>'
+          ).join('') +
+        '</div>';
+      }
+
       function resetFiltersForRun(data) {
         const providers = new Set((data.attempts || []).map((item) => item.provider_id));
         if (!providers.has(state.filters.provider)) {
@@ -1181,7 +1307,7 @@ function renderIndexHtml(): string {
         document.getElementById('content').innerHTML =
           '<section class="panel">' +
             '<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">' +
-              '<div><h2>' + summary.run_id + '</h2><p class="muted" style="margin-top:8px;">' + escapeHtml(summary.input_path) + '</p></div>' +
+              '<div><h2>' + summary.run_id + '</h2><p class="muted" style="margin-top:8px;">' + escapeHtml(summary.input_path) + '</p>' + renderRunExportButtons(summary.run_id) + '</div>' +
               '<div><span class="tag">' + summary.mode + '</span><span class="tag">' + summary.provider_ids.map(escapeHtml).join(', ') + '</span></div>' +
             '</div>' +
             '<div class="grid" style="margin-top:16px;">' +
@@ -1219,6 +1345,18 @@ function renderIndexHtml(): string {
 
         bindFilters();
         bindAttemptRows();
+        bindRunExportButtons();
+      }
+
+      function bindRunExportButtons() {
+        document.querySelectorAll('.run-export-button').forEach((node) => {
+          node.addEventListener('click', () => {
+            const runId = node.getAttribute('data-run-id');
+            const format = node.getAttribute('data-format');
+            if (!runId || !format) return;
+            window.location.href = '/api/runs/' + encodeURIComponent(runId) + '/export?format=' + encodeURIComponent(format);
+          });
+        });
       }
 
       function renderProviderTable(rows) {
@@ -1706,7 +1844,7 @@ function renderIndexHtml(): string {
         }
       }
 
-      Promise.all([loadProviders(), loadDemoAssets(), loadJobs(), loadRuns()]).catch((error) => {
+      Promise.all([loadProviders(), loadProviderCapabilities(), loadDemoAssets(), loadJobs(), loadRuns()]).catch((error) => {
         document.getElementById('content').innerHTML = '<section class="panel empty">Failed to load runs: ' + escapeHtml(error.message || String(error)) + '</section>';
       });
     </script>

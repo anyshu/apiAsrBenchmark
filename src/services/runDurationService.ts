@@ -33,6 +33,13 @@ export interface RunDurationOptions {
     completedAttempts: number;
     elapsedMs: number;
     durationMs: number;
+    retryHistory: Array<{
+      attempt: number;
+      statusCode?: number;
+      error?: BenchAttemptRecord['error'];
+      startedAt: string;
+      finishedAt: string;
+    }>;
   }) => void;
 }
 
@@ -166,6 +173,7 @@ export async function runDuration(options: RunDurationOptions): Promise<BenchRun
         completedAttempts: attempts.length,
         elapsedMs: Math.max(0, Date.now() - startedAtMs),
         durationMs: options.durationMs,
+        retryHistory: execution.retryHistory,
       });
 
       if (intervalMs > 0 && Date.now() < deadlineMs && !options.shouldStop?.()) {

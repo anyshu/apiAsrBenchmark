@@ -25,6 +25,13 @@ export interface RunOnceOptions {
     attempt: BenchAttemptRecord;
     completedAttempts: number;
     totalAttempts: number;
+    retryHistory: Array<{
+      attempt: number;
+      statusCode?: number;
+      error?: BenchAttemptRecord['error'];
+      startedAt: string;
+      finishedAt: string;
+    }>;
   }) => void;
 }
 
@@ -160,6 +167,7 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
           attempt,
           completedAttempts: attempts.length,
           totalAttempts,
+          retryHistory: execution.retryHistory,
         });
       }
     }

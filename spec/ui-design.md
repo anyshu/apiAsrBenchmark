@@ -21,6 +21,7 @@
 - run filters（provider / mode / failures / query）
 - create run form（mode、provider、多种 reference / manifest 参数）
 - background jobs（queued / running / succeeded / failed）
+- provider capability cards
 - run 列表
 - 展示 run id、模式、attempt 数、平均延迟、平均 WER
 
@@ -43,10 +44,12 @@
 
 当前 UI 不直接读取 `artifacts/runs/*` 文件，而是走本地 HTTP API：
 - `GET /api/providers`
+- `GET /api/provider-capabilities`
 - `GET /api/demo-assets`
 - `GET /api/jobs`
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
+- `GET /api/runs/:run_id/export`
 - `GET /api/runs/:run_id/attempts/:attempt_id/raw`
 - `POST /api/run`
 
@@ -69,11 +72,13 @@
 8. queued / running job 可请求取消
 9. job 成功后自动刷新 run 列表并打开最新 run
 10. job 卡片显示完成 attempt 数、进度条、当前 provider / audio
-11. 默认加载最新一个 run
-12. 点击左侧 run 卡片切换详情
-13. 在 attempt 面板按 provider / status / WER / latency 过滤
-14. 点击某个 attempt 查看 failure diagnostics、manifest metadata 和 transcript diff
-15. 通过图表快速判断延迟分布、质量分布和失败类型
+11. job 卡片展示最近 retry/backoff 诊断
+12. run header 提供 JSON / JSONL / CSV 下载按钮
+13. 默认加载最新一个 run
+14. 点击左侧 run 卡片切换详情
+15. 在 attempt 面板按 provider / status / WER / latency 过滤
+16. 点击某个 attempt 查看 failure diagnostics、manifest metadata 和 transcript diff
+17. 通过图表快速判断延迟分布、质量分布和失败类型
 
 ## 7. 后续演进方向
 

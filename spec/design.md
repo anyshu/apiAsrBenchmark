@@ -90,18 +90,20 @@ SQLite 的作用：
 ### UI Server
 - 使用 Node 内置 `http` 提供本地 dashboard
 - `GET /api/providers`
+- `GET /api/provider-capabilities`
 - `GET /api/demo-assets`
 - `GET /api/jobs`
 - `GET /api/jobs/:job_id`
 - `POST /api/jobs/:job_id/cancel`
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
+- `GET /api/runs/:run_id/export`
 - `GET /api/runs/:run_id/attempts/:attempt_id/raw`
 - `POST /api/run`
 - `/` 返回静态 HTML + JS 页面
 - `POST /api/run` 只负责排队并返回 job id，实际 benchmark 在后台执行
 - job 通过共享内存状态保存 `completed_attempts`、`progress_ratio`、当前 attempt、取消标记
-- 页面支持 run 过滤、浏览器内创建 run、background job 轮询、取消任务、demo 预填充、attempt 筛选、失败诊断、reference/hypothesis diff
+- 页面支持 run 过滤、浏览器内创建 run、background job 轮询、取消任务、demo 预填充、export 下载、provider capability 查看、attempt 筛选、失败诊断、reference/hypothesis diff
 - 页面基于当前 run 数据做轻量级条形图，不依赖前端图表库
 
 ## 4. 运行流程
@@ -163,6 +165,7 @@ SQLite 的作用：
 - Web UI run filters / create-run form / background jobs
 - demo dataset / demo provider assets
 - smoke scripts for OpenAI / ZenMux
+- run export downloads and provider capability panel
 
 后续可继续扩展：
 - SQLite 查询统计 API

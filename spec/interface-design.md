@@ -252,12 +252,14 @@ asrbench --db artifacts/asrbench.sqlite ui:serve --port 3000
 
 ```http
 GET /api/providers
+GET /api/provider-capabilities
 GET /api/demo-assets
 GET /api/jobs
 GET /api/jobs/:job_id
 POST /api/jobs/:job_id/cancel
 GET /api/runs
 GET /api/runs/:run_id
+GET /api/runs/:run_id/export
 GET /api/runs/:run_id/attempts/:attempt_id/raw
 POST /api/run
 GET /
@@ -265,6 +267,7 @@ GET /
 
 说明：
 - `/api/providers` 返回已加载的 provider 配置摘要，用于 UI 选择
+- `/api/provider-capabilities` 返回 provider operation、timestamp 能力、retry / runner 摘要
 - `/api/demo-assets` 返回 demo dataset / provider 的推荐本地路径，供 UI 快捷填充
 - `/api/jobs` 返回最近的浏览器触发 run job 列表
 - `/api/jobs/:job_id` 返回单个后台 job 的状态、错误、summary
@@ -272,6 +275,7 @@ GET /
 - `/api/runs` 返回 run summary 列表
 - `/api/runs` 支持 `provider`、`mode`、`failures`、`created_after`、`created_before`、`query`
 - `/api/runs/:run_id` 返回 summary + attempts
+- `/api/runs/:run_id/export` 支持 `format=json|jsonl|csv`
 - `/api/run` 创建后台 job；成功时返回 `202 Accepted`
 - `/` 返回最小 dashboard 页面
 

@@ -146,6 +146,7 @@ The dashboard now supports:
 - cooperative cancellation for queued / running browser jobs
 - inline form validation and structured field errors
 - demo dataset shortcuts for quickly filling the form
+- provider capability cards showing type / operation / timestamp support
 - provider / status / text filters
 - min latency / min WER thresholds
 - sorting by latency / WER / retries / recency
@@ -231,6 +232,11 @@ For a quick smoke test, the repo includes:
 - `/Users/hc/working/github/audioApibench/scripts/smoke-openai-demo.sh`
 - `/Users/hc/working/github/audioApibench/scripts/smoke-zenmux-demo.sh`
 
+Smoke scripts now:
+- create isolated output directories under `artifacts/smoke/*`
+- write `run.log`
+- write `failure.log` when the benchmark command fails
+
 Example:
 
 ```bash
@@ -267,4 +273,4 @@ Per run and per provider:
 - provider-level `runner_options` override CLI defaults during `run:duration`
 - retry policy uses exponential backoff from `retry_policy.backoff_ms`
 - ZenMux is modeled as an independent provider type, not only as a generic OpenAI-compatible endpoint
-- the local UI uses `GET /api/providers`, `GET /api/demo-assets`, `GET /api/jobs`, `GET /api/jobs/:job_id`, `POST /api/jobs/:job_id/cancel`, `GET /api/runs`, `GET /api/runs/:run_id`, `GET /api/runs/:run_id/attempts/:attempt_id/raw`, and `POST /api/run`
+- the local UI uses `GET /api/providers`, `GET /api/provider-capabilities`, `GET /api/demo-assets`, `GET /api/jobs`, `GET /api/jobs/:job_id`, `POST /api/jobs/:job_id/cancel`, `GET /api/runs`, `GET /api/runs/:run_id`, `GET /api/runs/:run_id/export`, `GET /api/runs/:run_id/attempts/:attempt_id/raw`, and `POST /api/run`

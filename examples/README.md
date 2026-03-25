@@ -9,8 +9,8 @@
 ## Demo provider
 
 - `demo-provider/openai-whisper-demo.yaml`: standalone provider config you can point `--config` at for quick OpenAI-compatible testing
-- `../scripts/smoke-openai-demo.sh`: smoke benchmark script for a real OpenAI-compatible call
-- `../scripts/smoke-zenmux-demo.sh`: smoke benchmark script for a real ZenMux call
+- `../scripts/smoke-openai-demo.sh`: smoke benchmark script for a real OpenAI-compatible call, with isolated output dir and logs
+- `../scripts/smoke-zenmux-demo.sh`: smoke benchmark script for a real ZenMux call, with isolated output dir and logs
 
 Example:
 
