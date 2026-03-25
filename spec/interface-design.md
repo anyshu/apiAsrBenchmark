@@ -221,6 +221,7 @@ asrbench --db artifacts/asrbench.sqlite ui:serve --port 3000
 ```http
 GET /api/runs
 GET /api/runs/:run_id
+GET /api/runs/:run_id/attempts/:attempt_id/raw
 GET /
 ```
 

@@ -1,4 +1,6 @@
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { URL } from 'node:url';
 import { getRunDetailFromSqlite, listRunsFromSqlite } from './sqliteStore.js';
@@ -47,6 +49,27 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
       }
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify(run, null, 2));
+      return;
+    }
+
+    const rawMatch = requestUrl.pathname.match(/^\/api\/runs\/([^/]+)\/attempts\/([^/]+)\/raw$/);
+    if (rawMatch) {
+      const run = await getRunDetailFromSqlite(options.dbPath, decodeURIComponent(rawMatch[1]));
+      if (!run) {
+        response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'run_not_found' }));
+        return;
+      }
+
+      const rawAttempt = await readRawAttemptArtifact(run.summary.attempts_path, decodeURIComponent(rawMatch[2]));
+      if (!rawAttempt) {
+        response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'raw_attempt_not_found' }));
+        return;
+      }
+
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify(rawAttempt, null, 2));
       return;
     }
 
@@ -369,6 +392,7 @@ function renderIndexHtml(): string {
         runs: [],
         activeRunId: null,
         activeRun: null,
+        rawAttemptById: {},
         filters: {
           provider: 'all',
           status: 'all',
@@ -442,9 +466,14 @@ function renderIndexHtml(): string {
         const response = await fetch('/api/runs/' + encodeURIComponent(runId));
         const data = await response.json();
         state.activeRun = data;
+        state.rawAttemptById = {};
         state.selectedAttemptId = data.attempts?.[0]?.attempt_id || null;
         resetFiltersForRun(data);
         renderActiveRun();
+        if (state.selectedAttemptId) {
+          await ensureRawAttemptLoaded(state.selectedAttemptId);
+          renderActiveRun();
+        }
       }
 
       function resetFiltersForRun(data) {
@@ -688,8 +717,9 @@ function renderIndexHtml(): string {
 
       function bindAttemptRows() {
         document.querySelectorAll('[data-attempt-id]').forEach((node) => {
-          node.addEventListener('click', () => {
+          node.addEventListener('click', async () => {
             state.selectedAttemptId = node.getAttribute('data-attempt-id');
+            await ensureRawAttemptLoaded(state.selectedAttemptId);
             renderActiveRun();
           });
         });
@@ -711,6 +741,7 @@ function renderIndexHtml(): string {
         const text = row.normalized_result?.text || '';
         const reference = row.evaluation?.reference_text || '';
         const diffHtml = reference ? renderWordDiff(reference, text) : '<div class="muted">No reference transcript attached for this attempt.</div>';
+        const rawAttempt = state.rawAttemptById[row.attempt_id];
         const metadata = {
           attempt_id: row.attempt_id,
           provider_id: row.provider_id,
@@ -734,6 +765,10 @@ function renderIndexHtml(): string {
           '<div class="detail-block">' +
             '<h4>Failure Diagnostics</h4>' +
             '<pre style="margin-top:12px;">' + escapeHtml(row.error ? JSON.stringify(row.error, null, 2) : 'No error for this attempt.') + '</pre>' +
+          '</div>' +
+          '<div class="detail-block">' +
+            '<h4>Raw Attempt Artifact</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(rawAttempt ? JSON.stringify(rawAttempt, null, 2) : 'Loading raw attempt artifact...') + '</pre>' +
           '</div>' +
           '<div class="detail-block">' +
             '<h4>Transcript Diff</h4>' +
@@ -812,10 +847,36 @@ function renderIndexHtml(): string {
         return normalized.split(/\\s+/).filter(Boolean);
       }
 
+      async function ensureRawAttemptLoaded(attemptId) {
+        if (!attemptId || state.rawAttemptById[attemptId] || !state.activeRunId) {
+          return;
+        }
+        try {
+          const response = await fetch('/api/runs/' + encodeURIComponent(state.activeRunId) + '/attempts/' + encodeURIComponent(attemptId) + '/raw');
+          if (!response.ok) {
+            state.rawAttemptById[attemptId] = { error: 'raw_attempt_not_found' };
+            return;
+          }
+          state.rawAttemptById[attemptId] = await response.json();
+        } catch (error) {
+          state.rawAttemptById[attemptId] = { error: error && error.message ? error.message : String(error) };
+        }
+      }
+
       loadRuns().catch((error) => {
         document.getElementById('content').innerHTML = '<section class="panel empty">Failed to load runs: ' + escapeHtml(error.message || String(error)) + '</section>';
       });
     </script>
   </body>
 </html>`;
+}
+
+async function readRawAttemptArtifact(attemptsPath: string, attemptId: string): Promise<unknown | undefined> {
+  const rawPath = path.join(path.dirname(attemptsPath), 'raw', `${attemptId}.json`);
+  try {
+    const payload = await fs.readFile(rawPath, 'utf8');
+    return JSON.parse(payload);
+  } catch {
+    return undefined;
+  }
 }

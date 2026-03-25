@@ -27,6 +27,7 @@
 - latency / WER / failure 可视化卡片
 - Attempt 列表表格
 - Attempt detail / transcript diff 侧栏
+- Raw attempt artifact 查看块
 
 ## 4. 视觉方向
 

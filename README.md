@@ -134,6 +134,7 @@ The dashboard now supports:
 - sorting by latency / WER / retries / recency
 - built-in latency / WER / failure bar charts
 - failure diagnostics on the selected attempt
+- raw attempt artifact inspection
 - side-by-side reference vs hypothesis diff chips
 
 List recent runs from SQLite:
