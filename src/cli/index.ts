@@ -196,7 +196,7 @@ program
   .command('ui:serve')
   .description('Serve a lightweight local dashboard backed by the SQLite run store')
   .option('--host <host>', 'host to bind', '127.0.0.1')
-  .option('--port <n>', 'port to bind', '3000')
+  .option('--port <n>', 'port to bind', '54541')
   .action(async (options: { host: string; port: string }) => {
     const globalOptions = program.opts<{ db: string; config: string }>();
     const { startUiServer } = await import('../services/uiServer.js');

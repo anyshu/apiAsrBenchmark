@@ -18,6 +18,7 @@
 ## 3. 页面结构
 
 ### 左侧 Sidebar
+- 顶部提供中英文切换（默认记住上次选择）
 - run filters（provider / mode / failures / query）
 - create run form（mode、provider、多种 reference / manifest 参数）
 - background jobs（queued / running / succeeded / failed）
@@ -39,6 +40,7 @@
 - 使用暖色纸面感背景 + 绿色强调色
 - 卡片化布局，便于未来扩展更多图表
 - 移动端退化为单列布局
+- 长路径、长 provider id 和多语言文案不能撑破 sidebar 卡片布局
 
 ## 5. 数据来源
 
@@ -68,17 +70,19 @@
 4. 可直接在浏览器内填写 create-run 表单发起 `run:once` / `run:duration`
 5. 表单错误以内联字段提示返回，而不是只弹通用错误
 6. UI 可一键填充 demo dataset / demo provider
-7. run 进入后台 job 队列，页面轮询 job 状态
-8. queued / running job 可请求取消
-9. job 成功后自动刷新 run 列表并打开最新 run
-10. job 卡片显示完成 attempt 数、进度条、当前 provider / audio
-11. job 卡片展示最近 retry/backoff 诊断
-12. run header 提供 JSON / JSONL / CSV 下载按钮
-13. 默认加载最新一个 run
-14. 点击左侧 run 卡片切换详情
-15. 在 attempt 面板按 provider / status / WER / latency 过滤
-16. 点击某个 attempt 查看 failure diagnostics、manifest metadata 和 transcript diff
-17. 通过图表快速判断延迟分布、质量分布和失败类型
+7. create-run 表单使用标准 `<form>` 提交，provider key 输入框属于表单上下文
+8. run 进入后台 job 队列，页面轮询 job 状态
+9. queued / running job 可请求取消
+10. job 成功后自动刷新 run 列表并打开最新 run
+11. job 卡片显示完成 attempt 数、进度条、当前 provider / audio
+12. job 卡片展示最近 retry/backoff 诊断
+13. provider 缺少 env / run-scoped key 时，在提交阶段直接拦截，而不是排队后失败
+14. run header 提供 JSON / JSONL / CSV 下载按钮
+15. 默认加载最新一个 run
+16. 点击左侧 run 卡片切换详情
+17. 在 attempt 面板按 provider / status / WER / latency 过滤
+18. 点击某个 attempt 查看 failure diagnostics、manifest metadata 和 transcript diff
+19. 通过图表快速判断延迟分布、质量分布和失败类型
 
 ## 7. 后续演进方向
 

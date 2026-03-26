@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { executeRunJob, validateRunSubmission } from '../src/services/uiServer.js';
+import { executeRunJob, renderIndexHtml, validateRunSubmission } from '../src/services/uiServer.js';
 import type { UiRunJob } from '../src/services/uiServer.js';
 
 async function createTempAudioFile(dir: string, name: string): Promise<string> {
@@ -48,6 +48,13 @@ test('ui server validation rejects missing paths and providers', async () => {
   assert.equal(validation.ok, false);
   assert.match(validation.fieldErrors.inputPath ?? '', /does not exist/i);
   assert.match(validation.fieldErrors.providerIds ?? '', /select at least one provider/i);
+});
+
+test('ui index includes locale switcher for English and Chinese', async () => {
+  const html = renderIndexHtml();
+  assert.match(html, /id="locale-en"/);
+  assert.match(html, /id="locale-zh"/);
+  assert.match(html, /asr-bench-locale/);
 });
 
 test('ui server validation keeps provider API key overrides for the selected providers', async () => {

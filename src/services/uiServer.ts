@@ -109,7 +109,7 @@ function redactJobForResponse(job: UiRunJob): UiRunJob {
 
 export async function startUiServer(options: UiServerOptions): Promise<RunningUiServer> {
   const host = options.host ?? '127.0.0.1';
-  const port = options.port ?? 3000;
+  const port = options.port ?? 54541;
   const runJobs = new Map<string, UiRunJob>();
 
   const server = http.createServer(async (request, response) => {
@@ -312,6 +312,22 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
         const requestBody = validation.value;
         if (!requestBody) {
           throw new Error('validated run submission missing request body');
+        }
+        const secretErrors = validateProviderSecretsForSubmission(requestBody, providersFile.providers);
+        if (Object.keys(secretErrors).length > 0) {
+          response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(
+            JSON.stringify(
+              {
+                error: 'validation_failed',
+                message: 'Please fix the highlighted fields and try again.',
+                field_errors: secretErrors,
+              },
+              null,
+              2,
+            ),
+          );
+          return;
         }
         const job: UiRunJob = {
           job_id: `job_${crypto.randomUUID().slice(0, 8)}`,
@@ -609,6 +625,35 @@ function describeProviderCapabilities(provider: ProviderConfig): Record<string, 
   };
 }
 
+function validateProviderSecretsForSubmission(
+  submission: RunSubmission,
+  providers: ProviderConfig[],
+): Record<string, string> {
+  const selectedProviders = providers.filter((provider) => submission.providerIds.includes(provider.provider_id));
+  const missingSecretProviders = selectedProviders
+    .filter((provider) => {
+      if (submission.providerApiKeys[provider.provider_id]) {
+        return false;
+      }
+      if (provider.api_key) {
+        return false;
+      }
+      if (!provider.api_key_env) {
+        return false;
+      }
+      return !process.env[provider.api_key_env];
+    })
+    .map((provider) => `${provider.provider_id} (${provider.api_key_env})`);
+
+  if (missingSecretProviders.length === 0) {
+    return {};
+  }
+
+  return {
+    providerIds: `Missing API key for: ${missingSecretProviders.join(', ')}`,
+  };
+}
+
 function toPositiveInteger(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value ?? fallback), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -628,7 +673,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-function renderIndexHtml(): string {
+export function renderIndexHtml(): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -684,10 +729,42 @@ function renderIndexHtml(): string {
       h1, h2, h3, h4 { margin: 0; }
       h1 { font-size: 30px; letter-spacing: 0.02em; }
       .subtitle, .muted { color: var(--muted); }
+      .sidebar-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .locale-switch {
+        display: inline-flex;
+        gap: 4px;
+        padding: 3px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.55);
+        transform: scale(0.82);
+        transform-origin: top right;
+      }
+      .locale-switch button {
+        border: 0;
+        border-radius: 999px;
+        padding: 4px 9px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        line-height: 1.1;
+      }
+      .locale-switch button.active {
+        background: var(--accent);
+        color: white;
+      }
       .run-list {
         display: grid;
         gap: 12px;
         margin-top: 18px;
+        min-width: 0;
       }
 
       .run-card, .panel {
@@ -696,6 +773,7 @@ function renderIndexHtml(): string {
         border-radius: 18px;
         padding: 16px;
         box-shadow: 0 10px 30px rgba(40, 31, 20, 0.06);
+        min-width: 0;
       }
 
       .run-card {
@@ -707,6 +785,16 @@ function renderIndexHtml(): string {
         transform: translateY(-1px);
         border-color: rgba(13, 122, 95, 0.45);
         background: linear-gradient(180deg, rgba(255,252,247,0.98), rgba(247,243,235,0.98));
+      }
+
+      .run-card p,
+      .run-card h3,
+      .panel p,
+      .panel h2,
+      .panel h3,
+      .panel h4 {
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       .tag {
@@ -773,6 +861,28 @@ function renderIndexHtml(): string {
         background: rgba(255,255,255,0.8);
         color: var(--ink);
         font: inherit;
+      }
+
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--ink);
+      }
+
+      .checkbox-row input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        margin: 0;
+        flex: 0 0 auto;
+      }
+
+      .checkbox-list {
+        display: grid;
+        gap: 10px;
       }
 
       table {
@@ -905,32 +1015,41 @@ function renderIndexHtml(): string {
   <body>
     <div class="shell">
       <aside class="sidebar">
-        <h1>ASR Bench</h1>
-        <p class="subtitle">SQLite-backed runs, latency, retries, transcript accuracy, and failure triage in one place.</p>
+        <div class="sidebar-top">
+          <div>
+            <h1 id="app-title">ASR Bench</h1>
+            <p id="app-subtitle" class="subtitle">SQLite-backed runs, latency, retries, transcript accuracy, and failure triage in one place.</p>
+          </div>
+          <div class="locale-switch" aria-label="Language switcher">
+            <button id="locale-en" type="button">EN</button>
+            <button id="locale-zh" type="button">中文</button>
+          </div>
+        </div>
         <div class="panel" style="margin-top:18px;">
-          <h3 style="margin-bottom:10px;">Run Filters</h3>
+          <h3 id="run-filters-title" style="margin-bottom:10px;">Run Filters</h3>
           <div id="run-filter-controls" class="controls"></div>
         </div>
         <div class="panel" style="margin-top:16px;">
-          <h3 style="margin-bottom:10px;">Create Run</h3>
+          <h3 id="create-run-title" style="margin-bottom:10px;">Create Run</h3>
           <div id="run-create-controls" class="controls"></div>
         </div>
         <div class="panel" style="margin-top:16px;">
-          <h3 style="margin-bottom:10px;">Background Jobs</h3>
+          <h3 id="background-jobs-title" style="margin-bottom:10px;">Background Jobs</h3>
           <div id="job-list"></div>
         </div>
         <div class="panel" style="margin-top:16px;">
-          <h3 style="margin-bottom:10px;">Providers</h3>
+          <h3 id="providers-title" style="margin-bottom:10px;">Providers</h3>
           <div id="provider-capabilities"></div>
         </div>
         <div id="run-list" class="run-list"></div>
       </aside>
       <main class="content" id="content">
-        <section class="panel empty">Loading benchmark runs...</section>
+        <section class="panel empty" id="initial-loading">Loading benchmark runs...</section>
       </main>
     </div>
     <script>
       const state = {
+        locale: detectPreferredLocale(),
         runs: [],
         providers: [],
         providerCapabilities: [],
@@ -973,6 +1092,369 @@ function renderIndexHtml(): string {
         selectedAttemptId: null,
       };
 
+      const translations = {
+        en: {
+          appSubtitle: 'SQLite-backed runs, latency, retries, transcript accuracy, and failure triage in one place.',
+          runFiltersTitle: 'Run Filters',
+          createRunTitle: 'Create Run',
+          backgroundJobsTitle: 'Background Jobs',
+          providersTitle: 'Providers',
+          loadingRuns: 'Loading benchmark runs...',
+          noRunsInDb: 'No benchmark runs found in the selected SQLite database.',
+          failuresSuffix: 'failures',
+          attemptsSuffix: 'attempts',
+          avgLatencyWer: 'avg latency {latency} ms, avg WER {wer}',
+          noProviderCapabilities: 'No provider capability data loaded.',
+          noDefaultModel: 'no default model',
+          timestamps: 'timestamps',
+          yes: 'yes',
+          no: 'no',
+          provider: 'Provider',
+          allProviders: 'All providers',
+          mode: 'Mode',
+          allModes: 'All modes',
+          once: 'Once',
+          duration: 'Duration',
+          failures: 'Failures',
+          any: 'Any',
+          failuresOnly: 'Failures only',
+          noFailures: 'No failures',
+          search: 'Search',
+          runIdOrPath: 'run id or path',
+          noProvidersLoaded: 'No providers loaded.',
+          providerKeyOverridesEnv: 'Overrides {value} for this run only',
+          providerKeyOverridesConfigured: 'Overrides the configured API key for this run only',
+          providerKeyUsedForRun: 'Used for this run only',
+          providerKeyLabel: '{provider} key',
+          providerKeyEmpty: 'Select a provider to enter a run-specific key.',
+          useDemoDataset: 'Use demo dataset',
+          selectDemoProvider: 'Select demo provider',
+          inputPath: 'Input path',
+          manifestPath: 'Manifest path',
+          referenceDir: 'Reference dir',
+          rounds: 'Rounds',
+          durationMs: 'Duration ms',
+          concurrency: 'Concurrency',
+          intervalMs: 'Interval ms',
+          useSidecarReference: 'Use sidecar reference txt',
+          providers: 'Providers',
+          providerKeys: 'Provider keys (optional, run-scoped override)',
+          submitting: 'Submitting...',
+          queueRun: 'Queue Run',
+          noJobs: 'No queued or recent jobs yet.',
+          done: 'done',
+          cancelled: 'cancelled',
+          failed: 'failed',
+          attemptsProgress: '{completed}/{total} attempts',
+          attemptsInDuration: '{completed} attempts in {elapsed} / {duration} ms',
+          attemptsOnly: '{completed} attempts',
+          openRun: 'Open run',
+          cancel: 'Cancel',
+          runBenchmarkFirst: 'Run a benchmark first, then refresh this page.',
+          backgroundJobFinished: 'Background job finished. Loaded the new run.',
+          cancellationRequested: 'Cancellation requested.',
+          downloadFormat: 'Download {format}',
+          attemptsMetric: 'Attempts',
+          successMetric: 'Success',
+          failuresMetric: 'Failures',
+          avgLatencyMetric: 'Avg latency',
+          p95LatencyMetric: 'P95 latency',
+          retriesMetric: 'Retries',
+          avgWerMetric: 'Avg WER',
+          avgCerMetric: 'Avg CER',
+          providerSummary: 'Provider Summary',
+          filteredAttempts: 'filtered attempts {count}',
+          visualOverview: 'Visual Overview',
+          attemptsSection: 'Attempts',
+          attemptsSubtitle: 'Filter failures, high latency, high WER, and inspect one sample in detail.',
+          noProviderSummaries: 'No provider summaries.',
+          noAttemptsForCharts: 'No attempts available for charting.',
+          latencyDistribution: 'Latency Distribution',
+          werDistribution: 'WER Distribution',
+          failureTypes: 'Failure Types',
+          noDataInSlice: 'No data in this slice.',
+          status: 'Status',
+          allAttempts: 'All attempts',
+          successOnly: 'Success only',
+          highLatency: 'High latency',
+          highWer: 'High WER',
+          providerTextError: 'provider, text, error...',
+          sort: 'Sort',
+          latencyDesc: 'Latency desc',
+          latencyAsc: 'Latency asc',
+          werDesc: 'WER desc',
+          retryDesc: 'Retry desc',
+          newestFirst: 'Newest first',
+          minLatencyMs: 'Min latency ms',
+          minWer: 'Min WER',
+          noAttemptsMatch: 'No attempts match the current filters.',
+          audio: 'audio',
+          latency: 'latency',
+          retry: 'retry',
+          text: 'text',
+          ok: 'ok',
+          selectAttempt: 'Select an attempt to inspect transcript diff and failure details.',
+          noReferenceAttached: 'No reference transcript attached for this attempt.',
+          attemptDetail: 'Attempt Detail',
+          success: 'success',
+          failure: 'failure',
+          failureDiagnostics: 'Failure Diagnostics',
+          noErrorForAttempt: 'No error for this attempt.',
+          rawAttemptArtifact: 'Raw Attempt Artifact',
+          loadingRawAttempt: 'Loading raw attempt artifact...',
+          transcriptDiff: 'Transcript Diff',
+          referenceTranscript: 'Reference Transcript',
+          noReferenceTranscript: 'No reference transcript.',
+          hypothesisTranscript: 'Hypothesis Transcript',
+          noNormalizedTranscript: 'No normalized transcript.',
+          loadedDemoDataset: 'Loaded demo dataset paths.',
+          demoProviderUnavailable: 'Demo provider is only available when the UI is started with --config examples/demo-provider.',
+          selectedDemoProvider: 'Selected demo provider.',
+          inputPathRequired: 'Input path is required.',
+          selectProviderRequired: 'Select at least one provider.',
+          roundsMin: 'Rounds must be >= 1.',
+          durationMin: 'Duration must be >= 1 ms.',
+          concurrencyMin: 'Concurrency must be >= 1.',
+          intervalMin: 'Interval must be >= 0.',
+          fixHighlightedFields: 'Please fix the highlighted fields.',
+          runCreationFailed: 'Run creation failed',
+          runQueued: 'Run queued in the background. The jobs panel will update automatically.',
+          failedToLoadRuns: 'Failed to load runs: {message}',
+          runningDurationBenchmark: 'Running duration benchmark.',
+          runningOnceBenchmark: 'Running once benchmark.',
+          cancellingAfterCurrentAttempt: 'Cancelling after current attempt...',
+          cancellationRequestedWaiting: 'Cancellation requested. Waiting for the current request boundary.',
+          jobCancelled: 'Job cancelled.',
+          jobCompletedSuccessfully: 'Job completed successfully.',
+          jobFailed: 'Job failed.',
+        },
+        zh: {
+          appSubtitle: '把 SQLite 持久化结果、延迟、重试、转写准确率和失败归因放到一个界面里查看。',
+          runFiltersTitle: '运行筛选',
+          createRunTitle: '创建任务',
+          backgroundJobsTitle: '后台任务',
+          providersTitle: '服务商',
+          loadingRuns: '正在加载 Benchmark 运行记录...',
+          noRunsInDb: '当前 SQLite 数据库里还没有 Benchmark 运行记录。',
+          failuresSuffix: '次失败',
+          attemptsSuffix: '次尝试',
+          avgLatencyWer: '平均延迟 {latency} ms，平均 WER {wer}',
+          noProviderCapabilities: '还没有加载到服务商能力信息。',
+          noDefaultModel: '未配置默认模型',
+          timestamps: '时间戳',
+          yes: '支持',
+          no: '不支持',
+          provider: '服务商',
+          allProviders: '全部服务商',
+          mode: '模式',
+          allModes: '全部模式',
+          once: '单次',
+          duration: '持续',
+          failures: '失败',
+          any: '全部',
+          failuresOnly: '只看失败',
+          noFailures: '无失败',
+          search: '搜索',
+          runIdOrPath: '运行 ID 或路径',
+          noProvidersLoaded: '还没有加载到服务商。',
+          providerKeyOverridesEnv: '仅本次运行覆盖 {value}',
+          providerKeyOverridesConfigured: '仅本次运行覆盖已配置的 API Key',
+          providerKeyUsedForRun: '仅用于本次运行',
+          providerKeyLabel: '{provider} 密钥',
+          providerKeyEmpty: '选中服务商后才能填写本次运行专用密钥。',
+          useDemoDataset: '使用 Demo 数据集',
+          selectDemoProvider: '选择 Demo 服务商',
+          inputPath: '输入路径',
+          manifestPath: 'Manifest 路径',
+          referenceDir: '参考文本目录',
+          rounds: '轮次',
+          durationMs: '持续时长 ms',
+          concurrency: '并发数',
+          intervalMs: '间隔 ms',
+          useSidecarReference: '使用 sidecar 参考 txt',
+          providers: '服务商',
+          providerKeys: '服务商密钥（可选，仅本次运行覆盖）',
+          submitting: '提交中...',
+          queueRun: '加入队列',
+          noJobs: '还没有排队或最近完成的任务。',
+          done: '完成',
+          cancelled: '已取消',
+          failed: '失败',
+          attemptsProgress: '{completed}/{total} 次尝试',
+          attemptsInDuration: '{completed} 次尝试，耗时 {elapsed} / {duration} ms',
+          attemptsOnly: '{completed} 次尝试',
+          openRun: '打开运行',
+          cancel: '取消',
+          runBenchmarkFirst: '请先运行一次 Benchmark，再刷新页面查看。',
+          backgroundJobFinished: '后台任务已完成，已自动切换到最新运行。',
+          cancellationRequested: '已发出取消请求。',
+          downloadFormat: '下载 {format}',
+          attemptsMetric: '尝试数',
+          successMetric: '成功数',
+          failuresMetric: '失败数',
+          avgLatencyMetric: '平均延迟',
+          p95LatencyMetric: 'P95 延迟',
+          retriesMetric: '重试数',
+          avgWerMetric: '平均 WER',
+          avgCerMetric: '平均 CER',
+          providerSummary: '服务商汇总',
+          filteredAttempts: '筛选后尝试 {count} 条',
+          visualOverview: '可视化概览',
+          attemptsSection: '尝试明细',
+          attemptsSubtitle: '筛出失败、高延迟、高 WER 样本，并查看单条样本的详细差异。',
+          noProviderSummaries: '暂无服务商汇总数据。',
+          noAttemptsForCharts: '当前没有可用于绘图的尝试数据。',
+          latencyDistribution: '延迟分布',
+          werDistribution: 'WER 分布',
+          failureTypes: '失败类型',
+          noDataInSlice: '这个切片里没有数据。',
+          status: '状态',
+          allAttempts: '全部尝试',
+          successOnly: '只看成功',
+          highLatency: '高延迟',
+          highWer: '高 WER',
+          providerTextError: '服务商、文本、错误...',
+          sort: '排序',
+          latencyDesc: '延迟降序',
+          latencyAsc: '延迟升序',
+          werDesc: 'WER 降序',
+          retryDesc: '重试降序',
+          newestFirst: '最新优先',
+          minLatencyMs: '最小延迟 ms',
+          minWer: '最小 WER',
+          noAttemptsMatch: '当前筛选条件下没有匹配的尝试。',
+          audio: '音频',
+          latency: '延迟',
+          retry: '重试',
+          text: '文本',
+          ok: '正常',
+          selectAttempt: '请选择一条尝试，查看转写 diff 和失败细节。',
+          noReferenceAttached: '这条尝试没有附带参考文本。',
+          attemptDetail: '尝试详情',
+          success: '成功',
+          failure: '失败',
+          failureDiagnostics: '失败诊断',
+          noErrorForAttempt: '这条尝试没有错误。',
+          rawAttemptArtifact: '原始尝试产物',
+          loadingRawAttempt: '正在加载原始尝试产物...',
+          transcriptDiff: '转写 Diff',
+          referenceTranscript: '参考文本',
+          noReferenceTranscript: '没有参考文本。',
+          hypothesisTranscript: '识别结果',
+          noNormalizedTranscript: '没有标准化转写结果。',
+          loadedDemoDataset: '已填入 Demo 数据集路径。',
+          demoProviderUnavailable: '只有在用 --config examples/demo-provider 启动 UI 时，才会提供 Demo 服务商。',
+          selectedDemoProvider: '已选择 Demo 服务商。',
+          inputPathRequired: '必须填写输入路径。',
+          selectProviderRequired: '至少选择一个服务商。',
+          roundsMin: '轮次必须 >= 1。',
+          durationMin: '持续时间必须 >= 1 ms。',
+          concurrencyMin: '并发数必须 >= 1。',
+          intervalMin: '间隔必须 >= 0。',
+          fixHighlightedFields: '请先修正标红字段。',
+          runCreationFailed: '创建运行任务失败',
+          runQueued: '运行任务已加入后台队列，任务面板会自动刷新。',
+          failedToLoadRuns: '加载运行记录失败：{message}',
+          runningDurationBenchmark: '正在执行持续 Benchmark。',
+          runningOnceBenchmark: '正在执行单次 Benchmark。',
+          cancellingAfterCurrentAttempt: '当前尝试完成后取消...',
+          cancellationRequestedWaiting: '已请求取消，等待当前请求边界结束。',
+          jobCancelled: '任务已取消。',
+          jobCompletedSuccessfully: '任务已完成。',
+          jobFailed: '任务失败。',
+        },
+      };
+
+      function detectPreferredLocale() {
+        const saved = window.localStorage.getItem('asr-bench-locale');
+        if (saved === 'en' || saved === 'zh') return saved;
+        return navigator.language && navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+      }
+
+      function t(key, values) {
+        const table = translations[state.locale] || translations.en;
+        const template = table[key] || translations.en[key] || key;
+        if (!values) return template;
+        return Object.entries(values).reduce((message, [name, value]) => {
+          return message.replaceAll('{' + name + '}', String(value));
+        }, template);
+      }
+
+      function translateMessage(message) {
+        const text = String(message || '').trim();
+        if (!text) return '';
+        const exact = {
+          'Running duration benchmark.': t('runningDurationBenchmark'),
+          'Running once benchmark.': t('runningOnceBenchmark'),
+          'Cancelling after current attempt...': t('cancellingAfterCurrentAttempt'),
+          'Cancellation requested. Waiting for the current request boundary.': t('cancellationRequestedWaiting'),
+          'Job cancelled.': t('jobCancelled'),
+          'Job completed successfully.': t('jobCompletedSuccessfully'),
+          'Job failed.': t('jobFailed'),
+          'Input path is required.': t('inputPathRequired'),
+          'Input path does not exist.': state.locale === 'zh' ? '输入路径不存在。' : 'Input path does not exist.',
+          'Select at least one provider.': t('selectProviderRequired'),
+          'Manifest path does not exist.': state.locale === 'zh' ? 'Manifest 路径不存在。' : 'Manifest path does not exist.',
+          'Reference directory does not exist.': state.locale === 'zh' ? '参考文本目录不存在。' : 'Reference directory does not exist.',
+          'Rounds must be >= 1.': t('roundsMin'),
+          'Duration must be >= 1 ms.': t('durationMin'),
+          'Concurrency must be >= 1.': t('concurrencyMin'),
+          'Interval must be >= 0.': t('intervalMin'),
+          'Please fix the highlighted fields.': t('fixHighlightedFields'),
+          'Run creation failed': t('runCreationFailed'),
+          'Run queued in the background. The jobs panel will update automatically.': t('runQueued'),
+          'Loaded demo dataset paths.': t('loadedDemoDataset'),
+          'Selected demo provider.': t('selectedDemoProvider'),
+          'Cancellation requested.': t('cancellationRequested'),
+          'Background job finished. Loaded the new run.': t('backgroundJobFinished'),
+          'Demo provider is only available when the UI is started with --config examples/demo-provider.': t('demoProviderUnavailable'),
+          'No queued or recent jobs yet.': t('noJobs'),
+          'No benchmark runs found in the selected SQLite database.': t('noRunsInDb'),
+        };
+        if (exact[text]) return exact[text];
+        return text
+          .replace(/^Input path does not exist: /, state.locale === 'zh' ? '输入路径不存在：' : 'Input path does not exist: ')
+          .replace(/^Manifest path does not exist: /, state.locale === 'zh' ? 'Manifest 路径不存在：' : 'Manifest path does not exist: ')
+          .replace(/^Reference dir does not exist: /, state.locale === 'zh' ? '参考文本目录不存在：' : 'Reference dir does not exist: ')
+          .replace(/^Reference directory does not exist: /, state.locale === 'zh' ? '参考文本目录不存在：' : 'Reference directory does not exist: ')
+          .replace(/^Unknown providers: /, state.locale === 'zh' ? '未知服务商：' : 'Unknown providers: ');
+      }
+
+      function renderShellChrome() {
+        document.documentElement.lang = state.locale === 'zh' ? 'zh-CN' : 'en';
+        document.title = 'ASR Bench';
+        document.getElementById('app-title').textContent = 'ASR Bench';
+        document.getElementById('app-subtitle').textContent = t('appSubtitle');
+        document.getElementById('run-filters-title').textContent = t('runFiltersTitle');
+        document.getElementById('create-run-title').textContent = t('createRunTitle');
+        document.getElementById('background-jobs-title').textContent = t('backgroundJobsTitle');
+        document.getElementById('providers-title').textContent = t('providersTitle');
+        const initialLoading = document.getElementById('initial-loading');
+        if (initialLoading) initialLoading.textContent = t('loadingRuns');
+        ['en', 'zh'].forEach((locale) => {
+          const button = document.getElementById('locale-' + locale);
+          if (!button) return;
+          button.classList.toggle('active', state.locale === locale);
+        });
+      }
+
+      function setLocale(locale) {
+        if (locale !== 'en' && locale !== 'zh') return;
+        state.locale = locale;
+        window.localStorage.setItem('asr-bench-locale', locale);
+        renderShellChrome();
+        renderRunSidebarControls();
+        renderRunList();
+        if (state.activeRun) {
+          renderActiveRun();
+        } else {
+          const content = document.getElementById('content');
+          if (content && !state.runs.length) {
+            content.innerHTML = '<section class="panel empty">' + escapeHtml(t('runBenchmarkFirst')) + '</section>';
+          }
+        }
+      }
+
       function fmt(value) {
         if (value === null || value === undefined || value === '') return '-';
         return String(value);
@@ -992,20 +1474,20 @@ function renderIndexHtml(): string {
       function renderRunList() {
         const root = document.getElementById('run-list');
         if (!state.runs.length) {
-          root.innerHTML = '<div class="run-card">No benchmark runs found in the selected SQLite database.</div>';
+          root.innerHTML = '<div class="run-card">' + escapeHtml(t('noRunsInDb')) + '</div>';
           return;
         }
 
         root.innerHTML = state.runs.map((run) => {
           const active = run.run_id === state.activeRunId ? 'active' : '';
-          const failureTag = run.failure_count > 0 ? '<div class="tag alert">' + run.failure_count + ' failures</div>' : '';
+          const failureTag = run.failure_count > 0 ? '<div class="tag alert">' + run.failure_count + ' ' + escapeHtml(t('failuresSuffix')) + '</div>' : '';
           return '<div class="run-card ' + active + '" data-run-id="' + run.run_id + '">' +
             '<div class="tag">' + run.mode + '</div>' +
-            '<div class="tag">' + run.attempt_count + ' attempts</div>' +
+            '<div class="tag">' + run.attempt_count + ' ' + escapeHtml(t('attemptsSuffix')) + '</div>' +
             failureTag +
             '<h3 style="margin-top:10px;font-size:16px;">' + run.run_id + '</h3>' +
-            '<p class="muted" style="margin:8px 0 0;">' + new Date(run.created_at).toLocaleString() + '</p>' +
-            '<p class="muted" style="margin:8px 0 0;">avg latency ' + fmt(run.average_latency_ms) + ' ms, avg WER ' + fmt(run.average_wer) + '</p>' +
+            '<p class="muted" style="margin:8px 0 0;">' + new Date(run.created_at).toLocaleString(state.locale === 'zh' ? 'zh-CN' : 'en-US') + '</p>' +
+            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(t('avgLatencyWer', { latency: fmt(run.average_latency_ms), wer: fmt(run.average_wer) })) + '</p>' +
           '</div>';
         }).join('');
 
@@ -1025,7 +1507,7 @@ function renderIndexHtml(): string {
         const root = document.getElementById('provider-capabilities');
         if (!root) return;
         if (!state.providerCapabilities.length) {
-          root.innerHTML = '<div class="muted">No provider capability data loaded.</div>';
+          root.innerHTML = '<div class="muted">' + escapeHtml(t('noProviderCapabilities')) + '</div>';
           return;
         }
 
@@ -1034,8 +1516,8 @@ function renderIndexHtml(): string {
             '<div class="tag">' + escapeHtml(item.type) + '</div>' +
             '<div class="tag">' + escapeHtml(item.operation) + '</div>' +
             '<h3 style="margin-top:10px;font-size:15px;">' + escapeHtml(item.provider_id) + '</h3>' +
-            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(item.default_model || 'no default model') + '</p>' +
-            '<p class="muted" style="margin:8px 0 0;">timestamps: ' + ((item.supports_word_timestamps || item.supports_segment_timestamps) ? 'yes' : 'no') + '</p>' +
+            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(item.default_model || t('noDefaultModel')) + '</p>' +
+            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(t('timestamps')) + ': ' + escapeHtml((item.supports_word_timestamps || item.supports_segment_timestamps) ? t('yes') : t('no')) + '</p>' +
           '</div>'
         ).join('');
       }
@@ -1045,20 +1527,20 @@ function renderIndexHtml(): string {
         if (!root) return;
         const providers = state.providers.map((provider) => provider.provider_id);
         root.innerHTML =
-          '<label>Provider<select id="run-filter-provider"><option value="all">All providers</option>' +
+          '<label>' + escapeHtml(t('provider')) + '<select id="run-filter-provider"><option value="all">' + escapeHtml(t('allProviders')) + '</option>' +
           providers.map((provider) => '<option value="' + escapeHtml(provider) + '"' + (provider === state.runFilters.provider ? ' selected' : '') + '>' + escapeHtml(provider) + '</option>').join('') +
           '</select></label>' +
-          '<label>Mode<select id="run-filter-mode">' +
-            '<option value="all"' + (state.runFilters.mode === 'all' ? ' selected' : '') + '>All modes</option>' +
-            '<option value="once"' + (state.runFilters.mode === 'once' ? ' selected' : '') + '>Once</option>' +
-            '<option value="duration"' + (state.runFilters.mode === 'duration' ? ' selected' : '') + '>Duration</option>' +
+          '<label>' + escapeHtml(t('mode')) + '<select id="run-filter-mode">' +
+            '<option value="all"' + (state.runFilters.mode === 'all' ? ' selected' : '') + '>' + escapeHtml(t('allModes')) + '</option>' +
+            '<option value="once"' + (state.runFilters.mode === 'once' ? ' selected' : '') + '>' + escapeHtml(t('once')) + '</option>' +
+            '<option value="duration"' + (state.runFilters.mode === 'duration' ? ' selected' : '') + '>' + escapeHtml(t('duration')) + '</option>' +
           '</select></label>' +
-          '<label>Failures<select id="run-filter-failures">' +
-            '<option value="all"' + (state.runFilters.failures === 'all' ? ' selected' : '') + '>Any</option>' +
-            '<option value="yes"' + (state.runFilters.failures === 'yes' ? ' selected' : '') + '>Failures only</option>' +
-            '<option value="no"' + (state.runFilters.failures === 'no' ? ' selected' : '') + '>No failures</option>' +
+          '<label>' + escapeHtml(t('failures')) + '<select id="run-filter-failures">' +
+            '<option value="all"' + (state.runFilters.failures === 'all' ? ' selected' : '') + '>' + escapeHtml(t('any')) + '</option>' +
+            '<option value="yes"' + (state.runFilters.failures === 'yes' ? ' selected' : '') + '>' + escapeHtml(t('failuresOnly')) + '</option>' +
+            '<option value="no"' + (state.runFilters.failures === 'no' ? ' selected' : '') + '>' + escapeHtml(t('noFailures')) + '</option>' +
           '</select></label>' +
-          '<label>Search<input id="run-filter-query" type="text" placeholder="run id or path" value="' + escapeHtml(state.runFilters.query) + '" /></label>';
+          '<label>' + escapeHtml(t('search')) + '<input id="run-filter-query" type="text" placeholder="' + escapeHtml(t('runIdOrPath')) + '" value="' + escapeHtml(state.runFilters.query) + '" /></label>';
 
         ['run-filter-provider', 'run-filter-mode', 'run-filter-failures', 'run-filter-query'].forEach((id) => {
           const node = document.getElementById(id);
@@ -1074,62 +1556,64 @@ function renderIndexHtml(): string {
         const isDuration = state.runForm.mode === 'duration';
         const providerCheckboxes = state.providers.length
           ? state.providers.map((provider) =>
-              '<label style="text-transform:none;letter-spacing:0;font-size:13px;">' +
+              '<label class="checkbox-row">' +
                 '<input type="checkbox" class="run-provider-checkbox" value="' + escapeHtml(provider.provider_id) + '"' +
                 (state.runForm.providerIds.includes(provider.provider_id) ? ' checked' : '') +
-                ' /> ' + escapeHtml(provider.provider_id) +
+                ' /><span>' + escapeHtml(provider.provider_id) + '</span>' +
               '</label>'
             ).join('')
-          : '<div class="muted">No providers loaded.</div>';
+          : '<div class="muted">' + escapeHtml(t('noProvidersLoaded')) + '</div>';
         const selectedProviders = state.providers.filter((provider) => state.runForm.providerIds.includes(provider.provider_id));
         const providerKeyInputs = selectedProviders.length
           ? '<div style="display:grid;gap:10px;margin-top:4px;">' +
               selectedProviders.map((provider) => {
                 const hint = provider.api_key_env
-                  ? 'Overrides ' + provider.api_key_env + ' for this run only'
+                  ? t('providerKeyOverridesEnv', { value: provider.api_key_env })
                   : provider.api_key
-                    ? 'Overrides the configured API key for this run only'
-                    : 'Used for this run only';
+                    ? t('providerKeyOverridesConfigured')
+                    : t('providerKeyUsedForRun');
                 return '<label style="text-transform:none;letter-spacing:0;font-size:13px;">' +
-                  provider.provider_id + ' key' +
+                  '<span>' + escapeHtml(t('providerKeyLabel', { provider: provider.provider_id })) + '</span>' +
                   '<input class="run-provider-key-input" data-provider-id="' + escapeHtml(provider.provider_id) + '" type="password" placeholder="' + escapeHtml(hint) + '" value="' + escapeHtml(state.runForm.providerApiKeys[provider.provider_id] || '') + '" autocomplete="off" />' +
                 '</label>';
               }).join('') +
             '</div>'
-          : '<div class="muted">Select a provider to enter a run-specific key.</div>';
+          : '<div class="muted">' + escapeHtml(t('providerKeyEmpty')) + '</div>';
 
-        const error = (field) => state.runFormErrors[field] ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(state.runFormErrors[field]) + '</div>' : '';
+        const error = (field) => state.runFormErrors[field] ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(translateMessage(state.runFormErrors[field])) + '</div>' : '';
         const message = state.runFormMessage
-          ? '<div class="detail-block" style="padding:10px 12px;font-size:12px;">' + escapeHtml(state.runFormMessage) + '</div>'
+          ? '<div class="detail-block" style="padding:10px 12px;font-size:12px;">' + escapeHtml(translateMessage(state.runFormMessage)) + '</div>'
           : '';
         const demoButtons = state.demoAssets
           ? '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-              '<button id="run-form-use-demo" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Use demo dataset</button>' +
-              '<button id="run-form-use-demo-provider" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Select demo provider</button>' +
+              '<button id="run-form-use-demo" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">' + escapeHtml(t('useDemoDataset')) + '</button>' +
+              '<button id="run-form-use-demo-provider" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">' + escapeHtml(t('selectDemoProvider')) + '</button>' +
             '</div>'
           : '';
 
         root.innerHTML =
           message +
           demoButtons +
-          '<label>Mode<select id="run-form-mode">' +
-            '<option value="once"' + (state.runForm.mode === 'once' ? ' selected' : '') + '>Once</option>' +
-            '<option value="duration"' + (state.runForm.mode === 'duration' ? ' selected' : '') + '>Duration</option>' +
-          '</select></label>' + error('mode') +
-          '<label>Input path<input id="run-form-input" type="text" placeholder="/path/to/audio" value="' + escapeHtml(state.runForm.inputPath) + '" /></label>' + error('inputPath') +
-          '<label>Manifest path<input id="run-form-manifest" type="text" placeholder="/path/to/manifest.json" value="' + escapeHtml(state.runForm.manifestPath) + '" /></label>' + error('manifestPath') +
-          '<label>Reference dir<input id="run-form-reference-dir" type="text" placeholder="/path/to/references" value="' + escapeHtml(state.runForm.referenceDir) + '" /></label>' + error('referenceDir') +
-          '<label>Rounds<input id="run-form-rounds" type="number" min="1" value="' + escapeHtml(state.runForm.rounds) + '"' + (isDuration ? ' disabled' : '') + ' /></label>' + error('rounds') +
-          '<label>Duration ms<input id="run-form-duration" type="number" min="1" value="' + escapeHtml(state.runForm.durationMs) + '"' + (isDuration ? '' : ' disabled') + ' /></label>' + error('durationMs') +
-          '<label>Concurrency<input id="run-form-concurrency" type="number" min="1" value="' + escapeHtml(state.runForm.concurrency) + '" /></label>' + error('concurrency') +
-          '<label>Interval ms<input id="run-form-interval" type="number" min="0" value="' + escapeHtml(state.runForm.intervalMs) + '" /></label>' + error('intervalMs') +
-          '<label style="text-transform:none;letter-spacing:0;font-size:13px;"><input id="run-form-sidecar" type="checkbox"' + (state.runForm.referenceSidecar ? ' checked' : '') + ' /> Use sidecar reference txt</label>' +
-          (state.runFormErrors.providerIds ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(state.runFormErrors.providerIds) + '</div>' : '') +
-          '<div style="display:grid;gap:6px;"><div class="muted" style="font-size:12px;">Providers</div>' + providerCheckboxes + '</div>' +
-          '<div style="display:grid;gap:6px;margin-top:10px;"><div class="muted" style="font-size:12px;">Provider keys (optional, run-scoped override)</div>' + providerKeyInputs + '</div>' +
-          '<button id="run-form-submit" style="margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--accent);color:white;cursor:' + (state.isSubmittingRun ? 'wait' : 'pointer') + ';"' + (state.isSubmittingRun ? ' disabled' : '') + '>' +
-            (state.isSubmittingRun ? 'Submitting...' : 'Queue Run') +
-          '</button>';
+          '<form id="run-create-form" style="display:grid;gap:10px;">' +
+            '<label>' + escapeHtml(t('mode')) + '<select id="run-form-mode">' +
+              '<option value="once"' + (state.runForm.mode === 'once' ? ' selected' : '') + '>' + escapeHtml(t('once')) + '</option>' +
+              '<option value="duration"' + (state.runForm.mode === 'duration' ? ' selected' : '') + '>' + escapeHtml(t('duration')) + '</option>' +
+            '</select></label>' + error('mode') +
+            '<label>' + escapeHtml(t('inputPath')) + '<input id="run-form-input" type="text" placeholder="/path/to/audio" value="' + escapeHtml(state.runForm.inputPath) + '" /></label>' + error('inputPath') +
+            '<label>' + escapeHtml(t('manifestPath')) + '<input id="run-form-manifest" type="text" placeholder="/path/to/manifest.json" value="' + escapeHtml(state.runForm.manifestPath) + '" /></label>' + error('manifestPath') +
+            '<label>' + escapeHtml(t('referenceDir')) + '<input id="run-form-reference-dir" type="text" placeholder="/path/to/references" value="' + escapeHtml(state.runForm.referenceDir) + '" /></label>' + error('referenceDir') +
+            '<label>' + escapeHtml(t('rounds')) + '<input id="run-form-rounds" type="number" min="1" value="' + escapeHtml(state.runForm.rounds) + '"' + (isDuration ? ' disabled' : '') + ' /></label>' + error('rounds') +
+            '<label>' + escapeHtml(t('durationMs')) + '<input id="run-form-duration" type="number" min="1" value="' + escapeHtml(state.runForm.durationMs) + '"' + (isDuration ? '' : ' disabled') + ' /></label>' + error('durationMs') +
+            '<label>' + escapeHtml(t('concurrency')) + '<input id="run-form-concurrency" type="number" min="1" value="' + escapeHtml(state.runForm.concurrency) + '" /></label>' + error('concurrency') +
+            '<label>' + escapeHtml(t('intervalMs')) + '<input id="run-form-interval" type="number" min="0" value="' + escapeHtml(state.runForm.intervalMs) + '" /></label>' + error('intervalMs') +
+            '<label class="checkbox-row"><input id="run-form-sidecar" type="checkbox"' + (state.runForm.referenceSidecar ? ' checked' : '') + ' /><span>' + escapeHtml(t('useSidecarReference')) + '</span></label>' +
+            (state.runFormErrors.providerIds ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(translateMessage(state.runFormErrors.providerIds)) + '</div>' : '') +
+            '<div style="display:grid;gap:6px;"><div class="muted" style="font-size:12px;">' + escapeHtml(t('providers')) + '</div><div class="checkbox-list">' + providerCheckboxes + '</div></div>' +
+            '<div style="display:grid;gap:6px;margin-top:10px;"><div class="muted" style="font-size:12px;">' + escapeHtml(t('providerKeys')) + '</div>' + providerKeyInputs + '</div>' +
+            '<button id="run-form-submit" type="submit" style="margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--accent);color:white;cursor:' + (state.isSubmittingRun ? 'wait' : 'pointer') + ';"' + (state.isSubmittingRun ? ' disabled' : '') + '>' +
+              escapeHtml(state.isSubmittingRun ? t('submitting') : t('queueRun')) +
+            '</button>' +
+          '</form>';
 
         ['run-form-mode', 'run-form-input', 'run-form-manifest', 'run-form-reference-dir', 'run-form-rounds', 'run-form-duration', 'run-form-concurrency', 'run-form-interval', 'run-form-sidecar']
           .forEach((id) => {
@@ -1144,9 +1628,12 @@ function renderIndexHtml(): string {
         document.querySelectorAll('.run-provider-key-input').forEach((node) => {
           node.addEventListener('input', updateRunFormFromDom);
         });
-        const submit = document.getElementById('run-form-submit');
-        if (submit) {
-          submit.addEventListener('click', submitRunForm);
+        const form = document.getElementById('run-create-form');
+        if (form) {
+          form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            void submitRunForm();
+          });
         }
         const useDemo = document.getElementById('run-form-use-demo');
         if (useDemo) {
@@ -1162,39 +1649,39 @@ function renderIndexHtml(): string {
         const root = document.getElementById('job-list');
         if (!root) return;
         if (!state.jobs.length) {
-          root.innerHTML = '<div class="muted">No queued or recent jobs yet.</div>';
+          root.innerHTML = '<div class="muted">' + escapeHtml(t('noJobs')) + '</div>';
           return;
         }
 
         root.innerHTML = state.jobs.map((job) => {
           const statusTag =
             job.status === 'succeeded'
-              ? '<span class="tag">done</span>'
+              ? '<span class="tag">' + escapeHtml(t('done')) + '</span>'
               : job.status === 'cancelled'
-                ? '<span class="tag alert">cancelled</span>'
+                ? '<span class="tag alert">' + escapeHtml(t('cancelled')) + '</span>'
               : job.status === 'failed'
-                ? '<span class="tag alert">failed</span>'
+                ? '<span class="tag alert">' + escapeHtml(t('failed')) + '</span>'
                 : '<span class="tag">' + escapeHtml(job.status) + '</span>';
           const progress = job.progress || {};
           const ratio = typeof progress.progress_ratio === 'number' ? Math.max(0, Math.min(1, progress.progress_ratio)) : 0;
           const progressLabel = progress.total_attempts
-            ? progress.completed_attempts + '/' + progress.total_attempts + ' attempts'
+            ? t('attemptsProgress', { completed: progress.completed_attempts, total: progress.total_attempts })
             : (progress.elapsed_ms !== undefined && progress.duration_ms !== undefined
-                ? progress.completed_attempts + ' attempts in ' + progress.elapsed_ms + ' / ' + progress.duration_ms + ' ms'
-                : progress.completed_attempts + ' attempts');
+                ? t('attemptsInDuration', { completed: progress.completed_attempts, elapsed: progress.elapsed_ms, duration: progress.duration_ms })
+                : t('attemptsOnly', { completed: progress.completed_attempts }));
           const runLink = job.summary?.run_id
-            ? '<button class="job-open-run" data-run-id="' + escapeHtml(job.summary.run_id) + '" style="margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Open run</button>'
+            ? '<button class="job-open-run" data-run-id="' + escapeHtml(job.summary.run_id) + '" style="margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">' + escapeHtml(t('openRun')) + '</button>'
             : '';
           const cancelButton = (job.status === 'queued' || job.status === 'running') && !job.cancel_requested
-            ? '<button class="job-cancel" data-job-id="' + escapeHtml(job.job_id) + '" style="margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Cancel</button>'
+            ? '<button class="job-cancel" data-job-id="' + escapeHtml(job.job_id) + '" style="margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">' + escapeHtml(t('cancel')) + '</button>'
             : '';
           const errorMessage = job.error?.message
-            ? '<p class="muted" style="margin:8px 0 0;color:#b94a32;">' + escapeHtml(job.error.message) + '</p>'
+            ? '<p class="muted" style="margin:8px 0 0;color:#b94a32;">' + escapeHtml(translateMessage(job.error.message)) + '</p>'
             : '';
           const progressBar =
             '<div style="margin-top:10px;">' +
               '<div class="bar-track" style="height:8px;"><div class="bar-fill" style="width:' + Math.round(ratio * 100) + '%;"></div></div>' +
-              '<p class="muted" style="margin:6px 0 0;">' + escapeHtml(progress.message || progressLabel) + '</p>' +
+              '<p class="muted" style="margin:6px 0 0;">' + escapeHtml(translateMessage(progress.message || progressLabel)) + '</p>' +
               '<p class="muted" style="margin:4px 0 0;">' + escapeHtml(progressLabel) + '</p>' +
               (progress.retry_history && progress.retry_history.length
                 ? '<pre style="margin-top:8px;font-size:11px;">' + escapeHtml(JSON.stringify(progress.retry_history, null, 2)) + '</pre>'
@@ -1247,7 +1734,7 @@ function renderIndexHtml(): string {
         if (state.activeRunId) {
           await loadRun(state.activeRunId);
         } else {
-          document.getElementById('content').innerHTML = '<section class="panel empty">Run a benchmark first, then refresh this page.</section>';
+          document.getElementById('content').innerHTML = '<section class="panel empty">' + escapeHtml(t('runBenchmarkFirst')) + '</section>';
         }
       }
 
@@ -1293,7 +1780,7 @@ function renderIndexHtml(): string {
         });
 
         if (preferredRunId) {
-          state.runFormMessage = 'Background job finished. Loaded the new run.';
+          state.runFormMessage = t('backgroundJobFinished');
           await loadRuns(preferredRunId);
         }
 
@@ -1305,7 +1792,7 @@ function renderIndexHtml(): string {
         await fetch('/api/jobs/' + encodeURIComponent(jobId) + '/cancel', {
           method: 'POST',
         });
-        state.runFormMessage = 'Cancellation requested.';
+        state.runFormMessage = t('cancellationRequested');
         await loadJobs();
       }
 
@@ -1331,7 +1818,7 @@ function renderIndexHtml(): string {
         const formats = ['json', 'jsonl', 'csv'];
         return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">' +
           formats.map((format) =>
-            '<button class="run-export-button" data-run-id="' + escapeHtml(runId) + '" data-format="' + format + '" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">Download ' + format.toUpperCase() + '</button>'
+            '<button class="run-export-button" data-run-id="' + escapeHtml(runId) + '" data-format="' + format + '" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">' + escapeHtml(t('downloadFormat', { format: format.toUpperCase() })) + '</button>'
           ).join('') +
         '</div>';
       }
@@ -1356,30 +1843,30 @@ function renderIndexHtml(): string {
               '<div><span class="tag">' + summary.mode + '</span><span class="tag">' + summary.provider_ids.map(escapeHtml).join(', ') + '</span></div>' +
             '</div>' +
             '<div class="grid" style="margin-top:16px;">' +
-              metric('Attempts', summary.attempt_count) +
-              metric('Success', summary.success_count) +
-              metric('Failures', summary.failure_count) +
-              metric('Avg latency', summary.average_latency_ms === undefined ? '-' : summary.average_latency_ms + ' ms') +
-              metric('P95 latency', summary.p95_latency_ms === undefined ? '-' : summary.p95_latency_ms + ' ms') +
-              metric('Retries', summary.total_retry_count) +
-              metric('Avg WER', summary.average_wer) +
-              metric('Avg CER', summary.average_cer) +
+              metric(t('attemptsMetric'), summary.attempt_count) +
+              metric(t('successMetric'), summary.success_count) +
+              metric(t('failuresMetric'), summary.failure_count) +
+              metric(t('avgLatencyMetric'), summary.average_latency_ms === undefined ? '-' : summary.average_latency_ms + ' ms') +
+              metric(t('p95LatencyMetric'), summary.p95_latency_ms === undefined ? '-' : summary.p95_latency_ms + ' ms') +
+              metric(t('retriesMetric'), summary.total_retry_count) +
+              metric(t('avgWerMetric'), summary.average_wer) +
+              metric(t('avgCerMetric'), summary.average_cer) +
             '</div>' +
           '</section>' +
           '<section class="panel">' +
             '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">' +
-              '<div><h3 style="margin-bottom:12px;">Provider Summary</h3></div>' +
-              '<div class="tag">filtered attempts ' + attempts.length + '</div>' +
+              '<div><h3 style="margin-bottom:12px;">' + escapeHtml(t('providerSummary')) + '</h3></div>' +
+              '<div class="tag">' + escapeHtml(t('filteredAttempts', { count: attempts.length })) + '</div>' +
             '</div>' +
             renderProviderTable(summary.provider_summaries || []) +
           '</section>' +
           '<section class="panel">' +
-            '<h3 style="margin-bottom:12px;">Visual Overview</h3>' +
+            '<h3 style="margin-bottom:12px;">' + escapeHtml(t('visualOverview')) + '</h3>' +
             renderCharts(attempts) +
           '</section>' +
           '<section class="panel">' +
             '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">' +
-              '<div><h3 style="margin-bottom:6px;">Attempts</h3><p class="muted" style="margin:0;">Filter failures, high latency, high WER, and inspect one sample in detail.</p></div>' +
+              '<div><h3 style="margin-bottom:6px;">' + escapeHtml(t('attemptsSection')) + '</h3><p class="muted" style="margin:0;">' + escapeHtml(t('attemptsSubtitle')) + '</p></div>' +
             '</div>' +
             renderAttemptFilters(state.activeRun.attempts || []) +
             '<div class="split" style="margin-top:16px;">' +
@@ -1405,15 +1892,15 @@ function renderIndexHtml(): string {
       }
 
       function renderProviderTable(rows) {
-        if (!rows.length) return '<div class="empty">No provider summaries.</div>';
-        return '<table><thead><tr><th>provider</th><th>attempts</th><th>avg latency</th><th>retries</th><th>avg WER</th><th>avg CER</th></tr></thead><tbody>' +
+        if (!rows.length) return '<div class="empty">' + escapeHtml(t('noProviderSummaries')) + '</div>';
+        return '<table><thead><tr><th>' + escapeHtml(t('provider')).toLowerCase() + '</th><th>' + escapeHtml(t('attemptsMetric')).toLowerCase() + '</th><th>' + escapeHtml(t('avgLatencyMetric')).toLowerCase() + '</th><th>' + escapeHtml(t('retriesMetric')).toLowerCase() + '</th><th>avg WER</th><th>avg CER</th></tr></thead><tbody>' +
           rows.map((row) => '<tr><td>' + escapeHtml(row.provider_id) + '</td><td>' + row.attempt_count + '</td><td>' + fmt(row.average_latency_ms) + '</td><td>' + fmt(row.total_retry_count) + '</td><td>' + fmt(row.average_wer) + '</td><td>' + fmt(row.average_cer) + '</td></tr>').join('') +
           '</tbody></table>';
       }
 
       function renderCharts(rows) {
         if (!rows.length) {
-          return '<div class="empty">No attempts available for charting.</div>';
+          return '<div class="empty">' + escapeHtml(t('noAttemptsForCharts')) + '</div>';
         }
 
         const latencyBuckets = [
@@ -1442,9 +1929,9 @@ function renderIndexHtml(): string {
         );
 
         return '<div class="chart-stack">' +
-          renderBarChart('Latency Distribution', bucketCounts(rows, latencyBuckets)) +
-          renderBarChart('WER Distribution', bucketCounts(rows.filter((row) => row.evaluation), werBuckets)) +
-          renderBarChart('Failure Types', failureCounts) +
+          renderBarChart(t('latencyDistribution'), bucketCounts(rows, latencyBuckets)) +
+          renderBarChart(t('werDistribution'), bucketCounts(rows.filter((row) => row.evaluation), werBuckets)) +
+          renderBarChart(t('failureTypes'), failureCounts) +
         '</div>';
       }
 
@@ -1455,11 +1942,11 @@ function renderIndexHtml(): string {
       function renderBarChart(title, rows) {
         const filtered = rows.filter(([, value]) => value > 0);
         if (!filtered.length) {
-          return '<div class="chart"><div class="chart-title">' + title + '</div><div class="muted">No data in this slice.</div></div>';
+          return '<div class="chart"><div class="chart-title">' + escapeHtml(title) + '</div><div class="muted">' + escapeHtml(t('noDataInSlice')) + '</div></div>';
         }
         const maxValue = Math.max(...filtered.map(([, value]) => value), 1);
         return '<div class="chart">' +
-          '<div class="chart-title">' + title + '</div>' +
+          '<div class="chart-title">' + escapeHtml(title) + '</div>' +
           '<div class="bar-list">' +
             filtered.map(([label, value]) => {
               const pct = Math.max(4, Math.round((value / maxValue) * 100));
@@ -1476,24 +1963,24 @@ function renderIndexHtml(): string {
       function renderAttemptFilters(rows) {
         const providers = Array.from(new Set(rows.map((row) => row.provider_id))).sort();
         return '<div class="controls">' +
-          '<label>Provider<select id="provider-filter"><option value="all">All providers</option>' + providers.map((provider) => '<option value="' + escapeHtml(provider) + '"' + (provider === state.filters.provider ? ' selected' : '') + '>' + escapeHtml(provider) + '</option>').join('') + '</select></label>' +
-          '<label>Status<select id="status-filter">' +
-            optionMarkup('status', 'all', 'All attempts') +
-            optionMarkup('status', 'success', 'Success only') +
-            optionMarkup('status', 'failure', 'Failures only') +
-            optionMarkup('status', 'high_latency', 'High latency') +
-            optionMarkup('status', 'high_wer', 'High WER') +
+          '<label>' + escapeHtml(t('provider')) + '<select id="provider-filter"><option value="all">' + escapeHtml(t('allProviders')) + '</option>' + providers.map((provider) => '<option value="' + escapeHtml(provider) + '"' + (provider === state.filters.provider ? ' selected' : '') + '>' + escapeHtml(provider) + '</option>').join('') + '</select></label>' +
+          '<label>' + escapeHtml(t('status')) + '<select id="status-filter">' +
+            optionMarkup('status', 'all', t('allAttempts')) +
+            optionMarkup('status', 'success', t('successOnly')) +
+            optionMarkup('status', 'failure', t('failuresOnly')) +
+            optionMarkup('status', 'high_latency', t('highLatency')) +
+            optionMarkup('status', 'high_wer', t('highWer')) +
           '</select></label>' +
-          '<label>Search<input id="search-filter" type="text" placeholder="provider, text, error..." value="' + escapeHtml(state.filters.search) + '" /></label>' +
-          '<label>Sort<select id="sort-filter">' +
-            optionMarkup('sort', 'latency_desc', 'Latency desc') +
-            optionMarkup('sort', 'latency_asc', 'Latency asc') +
-            optionMarkup('sort', 'wer_desc', 'WER desc') +
-            optionMarkup('sort', 'retry_desc', 'Retry desc') +
-            optionMarkup('sort', 'recent_desc', 'Newest first') +
+          '<label>' + escapeHtml(t('search')) + '<input id="search-filter" type="text" placeholder="' + escapeHtml(t('providerTextError')) + '" value="' + escapeHtml(state.filters.search) + '" /></label>' +
+          '<label>' + escapeHtml(t('sort')) + '<select id="sort-filter">' +
+            optionMarkup('sort', 'latency_desc', t('latencyDesc')) +
+            optionMarkup('sort', 'latency_asc', t('latencyAsc')) +
+            optionMarkup('sort', 'wer_desc', t('werDesc')) +
+            optionMarkup('sort', 'retry_desc', t('retryDesc')) +
+            optionMarkup('sort', 'recent_desc', t('newestFirst')) +
           '</select></label>' +
-          '<label>Min latency ms<input id="latency-filter" type="number" min="0" step="1" placeholder="1000" value="' + escapeHtml(state.filters.minLatency) + '" /></label>' +
-          '<label>Min WER<input id="wer-filter" type="number" min="0" max="1" step="0.01" placeholder="0.2" value="' + escapeHtml(state.filters.minWer) + '" /></label>' +
+          '<label>' + escapeHtml(t('minLatencyMs')) + '<input id="latency-filter" type="number" min="0" step="1" placeholder="1000" value="' + escapeHtml(state.filters.minLatency) + '" /></label>' +
+          '<label>' + escapeHtml(t('minWer')) + '<input id="wer-filter" type="number" min="0" max="1" step="0.01" placeholder="0.2" value="' + escapeHtml(state.filters.minWer) + '" /></label>' +
         '</div>';
       }
 
@@ -1547,26 +2034,26 @@ function renderIndexHtml(): string {
         state.runForm.manifestPath = state.demoAssets.demo_manifest_path || state.runForm.manifestPath;
         state.runForm.referenceSidecar = true;
         state.runForm.referenceDir = '';
-        state.runFormMessage = 'Loaded demo dataset paths.';
+        state.runFormMessage = t('loadedDemoDataset');
         renderRunCreateControls();
       }
 
       function applyDemoProviderPreset() {
         const match = state.providers.find((provider) => provider.provider_id === 'openai-whisper-demo');
         if (!match) {
-          state.runFormMessage = 'Demo provider is only available when the UI is started with --config examples/demo-provider.';
+          state.runFormMessage = t('demoProviderUnavailable');
           renderRunCreateControls();
           return;
         }
         state.runForm.providerIds = [match.provider_id];
-        state.runFormMessage = 'Selected demo provider.';
+        state.runFormMessage = t('selectedDemoProvider');
         renderRunCreateControls();
       }
 
       function validateRunForm() {
         const errors = {};
-        if (!state.runForm.inputPath) errors.inputPath = 'Input path is required.';
-        if (!state.runForm.providerIds.length) errors.providerIds = 'Select at least one provider.';
+        if (!state.runForm.inputPath) errors.inputPath = t('inputPathRequired');
+        if (!state.runForm.providerIds.length) errors.providerIds = t('selectProviderRequired');
 
         const rounds = Number.parseInt(state.runForm.rounds || '1', 10);
         const durationMs = Number.parseInt(state.runForm.durationMs || '30000', 10);
@@ -1574,16 +2061,16 @@ function renderIndexHtml(): string {
         const intervalMs = Number.parseInt(state.runForm.intervalMs || '0', 10);
 
         if (state.runForm.mode === 'once' && (!Number.isFinite(rounds) || rounds < 1)) {
-          errors.rounds = 'Rounds must be >= 1.';
+          errors.rounds = t('roundsMin');
         }
         if (state.runForm.mode === 'duration' && (!Number.isFinite(durationMs) || durationMs < 1)) {
-          errors.durationMs = 'Duration must be >= 1 ms.';
+          errors.durationMs = t('durationMin');
         }
         if (!Number.isFinite(concurrency) || concurrency < 1) {
-          errors.concurrency = 'Concurrency must be >= 1.';
+          errors.concurrency = t('concurrencyMin');
         }
         if (!Number.isFinite(intervalMs) || intervalMs < 0) {
-          errors.intervalMs = 'Interval must be >= 0.';
+          errors.intervalMs = t('intervalMin');
         }
 
         return errors;
@@ -1645,15 +2132,15 @@ function renderIndexHtml(): string {
           const data = await response.json();
           if (response.status === 400) {
             state.runFormErrors = data && data.field_errors ? data.field_errors : {};
-            state.runFormMessage = data && data.message ? data.message : 'Please fix the highlighted fields.';
+            state.runFormMessage = data && data.message ? data.message : t('fixHighlightedFields');
             renderRunCreateControls();
             return;
           }
           if (!response.ok) {
-            throw new Error(data && data.message ? data.message : 'Run creation failed');
+            throw new Error(data && data.message ? data.message : t('runCreationFailed'));
           }
           state.runFormErrors = {};
-          state.runFormMessage = 'Run queued in the background. The jobs panel will update automatically.';
+          state.runFormMessage = t('runQueued');
           await loadJobs();
         } catch (error) {
           state.runFormMessage = error && error.message ? error.message : String(error);
@@ -1723,8 +2210,8 @@ function renderIndexHtml(): string {
       }
 
       function renderAttemptTable(rows, selectedAttempt) {
-        if (!rows.length) return '<div class="empty">No attempts match the current filters.</div>';
-        return '<table><thead><tr><th>provider</th><th>audio</th><th>latency</th><th>retry</th><th>status</th><th>WER</th><th>CER</th><th>text</th></tr></thead><tbody>' +
+        if (!rows.length) return '<div class="empty">' + escapeHtml(t('noAttemptsMatch')) + '</div>';
+        return '<table><thead><tr><th>' + escapeHtml(t('provider')).toLowerCase() + '</th><th>' + escapeHtml(t('audio')) + '</th><th>' + escapeHtml(t('latency')) + '</th><th>' + escapeHtml(t('retry')) + '</th><th>' + escapeHtml(t('status')).toLowerCase() + '</th><th>WER</th><th>CER</th><th>' + escapeHtml(t('text')) + '</th></tr></thead><tbody>' +
           rows.map((row) => {
             const active = selectedAttempt && row.attempt_id === selectedAttempt.attempt_id ? ' active' : '';
             const text = row.normalized_result?.text || '';
@@ -1734,7 +2221,7 @@ function renderIndexHtml(): string {
               '<td><div>' + escapeHtml(row.audio_id) + '</div>' + (audioMeta ? '<div class="muted" style="margin-top:4px;font-size:11px;">' + escapeHtml(audioMeta) + '</div>' : '') + '</td>' +
               '<td>' + fmt(row.latency_ms) + '</td>' +
               '<td>' + fmt(row.retry_count) + '</td>' +
-              '<td>' + (row.success ? '<span class="tag">ok</span>' : '<span class="tag alert">' + escapeHtml(fmt(row.error?.type)) + '</span>') + '</td>' +
+              '<td>' + (row.success ? '<span class="tag">' + escapeHtml(t('ok')) + '</span>' : '<span class="tag alert">' + escapeHtml(fmt(row.error?.type)) + '</span>') + '</td>' +
               '<td>' + fmt(row.evaluation?.word_error_rate) + '</td>' +
               '<td>' + fmt(row.evaluation?.char_error_rate) + '</td>' +
               '<td>' + escapeHtml(text.slice(0, 100)) + (text.length > 100 ? '...' : '') + '</td>' +
@@ -1763,12 +2250,12 @@ function renderIndexHtml(): string {
 
       function renderAttemptDetail(row) {
         if (!row) {
-          return '<div class="detail-block empty">Select an attempt to inspect transcript diff and failure details.</div>';
+          return '<div class="detail-block empty">' + escapeHtml(t('selectAttempt')) + '</div>';
         }
 
         const text = row.normalized_result?.text || '';
         const reference = row.evaluation?.reference_text || '';
-        const diffHtml = reference ? renderWordDiff(reference, text) : '<div class="muted">No reference transcript attached for this attempt.</div>';
+        const diffHtml = reference ? renderWordDiff(reference, text) : '<div class="muted">' + escapeHtml(t('noReferenceAttached')) + '</div>';
         const rawAttempt = state.rawAttemptById[row.attempt_id];
         const metadata = {
           attempt_id: row.attempt_id,
@@ -1789,30 +2276,30 @@ function renderIndexHtml(): string {
         return '<div class="detail-stack">' +
           '<div class="detail-block">' +
             '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap;">' +
-              '<h3>Attempt Detail</h3>' +
-              (row.success ? '<span class="tag">success</span>' : '<span class="tag alert">failure</span>') +
+              '<h3>' + escapeHtml(t('attemptDetail')) + '</h3>' +
+              (row.success ? '<span class="tag">' + escapeHtml(t('success')) + '</span>' : '<span class="tag alert">' + escapeHtml(t('failure')) + '</span>') +
             '</div>' +
             '<pre style="margin-top:12px;">' + escapeHtml(JSON.stringify(metadata, null, 2)) + '</pre>' +
           '</div>' +
           '<div class="detail-block">' +
-            '<h4>Failure Diagnostics</h4>' +
-            '<pre style="margin-top:12px;">' + escapeHtml(row.error ? JSON.stringify(row.error, null, 2) : 'No error for this attempt.') + '</pre>' +
+            '<h4>' + escapeHtml(t('failureDiagnostics')) + '</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(row.error ? JSON.stringify(row.error, null, 2) : t('noErrorForAttempt')) + '</pre>' +
           '</div>' +
           '<div class="detail-block">' +
-            '<h4>Raw Attempt Artifact</h4>' +
-            '<pre style="margin-top:12px;">' + escapeHtml(rawAttempt ? JSON.stringify(rawAttempt, null, 2) : 'Loading raw attempt artifact...') + '</pre>' +
+            '<h4>' + escapeHtml(t('rawAttemptArtifact')) + '</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(rawAttempt ? JSON.stringify(rawAttempt, null, 2) : t('loadingRawAttempt')) + '</pre>' +
           '</div>' +
           '<div class="detail-block">' +
-            '<h4>Transcript Diff</h4>' +
+            '<h4>' + escapeHtml(t('transcriptDiff')) + '</h4>' +
             '<div style="margin-top:12px;">' + diffHtml + '</div>' +
           '</div>' +
           '<div class="detail-block">' +
-            '<h4>Reference Transcript</h4>' +
-            '<pre style="margin-top:12px;">' + escapeHtml(reference || 'No reference transcript.') + '</pre>' +
+            '<h4>' + escapeHtml(t('referenceTranscript')) + '</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(reference || t('noReferenceTranscript')) + '</pre>' +
           '</div>' +
           '<div class="detail-block">' +
-            '<h4>Hypothesis Transcript</h4>' +
-            '<pre style="margin-top:12px;">' + escapeHtml(text || 'No normalized transcript.') + '</pre>' +
+            '<h4>' + escapeHtml(t('hypothesisTranscript')) + '</h4>' +
+            '<pre style="margin-top:12px;">' + escapeHtml(text || t('noNormalizedTranscript')) + '</pre>' +
           '</div>' +
         '</div>';
       }
@@ -1895,8 +2382,15 @@ function renderIndexHtml(): string {
         }
       }
 
+      renderShellChrome();
+      document.getElementById('locale-en').addEventListener('click', () => setLocale('en'));
+      document.getElementById('locale-zh').addEventListener('click', () => setLocale('zh'));
+
       Promise.all([loadProviders(), loadProviderCapabilities(), loadDemoAssets(), loadJobs(), loadRuns()]).catch((error) => {
-        document.getElementById('content').innerHTML = '<section class="panel empty">Failed to load runs: ' + escapeHtml(error.message || String(error)) + '</section>';
+        document.getElementById('content').innerHTML =
+          '<section class="panel empty">' +
+            escapeHtml(t('failedToLoadRuns', { message: error.message || String(error) })) +
+          '</section>';
       });
     </script>
   </body>

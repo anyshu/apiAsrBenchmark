@@ -118,7 +118,7 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
         const executionResult = execution.result;
         const latencyMs =
           new Date(executionResult.finishedAt).getTime() - new Date(executionResult.startedAt).getTime();
-        const attemptId = `${provider.provider_id}__${audio.audio_id}__r${roundIndex}`;
+        const attemptId = `${runId}__${provider.provider_id}__${audio.audio_id}__r${roundIndex}`;
 
         await writeRawAttemptArtifact(rawDir, attemptId, {
           provider_id: provider.provider_id,
