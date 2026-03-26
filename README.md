@@ -166,7 +166,9 @@ npm run cli -- --db artifacts/asrbench.sqlite ui:serve --port 3000
 
 The dashboard now supports:
 - run filtering by provider / mode / failures / search text
+- a compact shell with top-level navigation for overview / create run / jobs / providers
 - starting `run:once` or `run:duration` jobs from the browser
+- provider key overrides saved in browser storage for re-use on later runs
 - non-blocking background job polling for browser-triggered runs
 - cooperative cancellation for queued / running browser jobs
 - inline form validation and structured field errors

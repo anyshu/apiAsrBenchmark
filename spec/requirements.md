@@ -87,9 +87,10 @@
 - CLI 全局支持 `--manifest`
 - SQLite run 查询支持按 provider、mode、失败情况、时间范围过滤
 - 本地 Web UI 从 SQLite 读取 runs / attempts，不直接读取 provider-specific 逻辑
-- Web UI 支持 run 列表过滤、浏览器内创建 run、后台 job 轮询、失败 attempt 筛选、关键指标过滤、transcript diff 查看
+- Web UI 支持 run 列表过滤、一级导航式主内容区、浏览器内创建 run、后台 job 轮询、失败 attempt 筛选、关键指标过滤、transcript diff 查看
 - Web UI 创建 run 时应返回结构化字段校验错误，避免只有通用报错
 - Web UI 创建 run 时应支持为选中的 provider 传入单次运行专用 API key override，且服务端响应不得回显这些 key
+- Web UI 创建 run 时输入的 provider key 可保存在浏览器 storage 中，供后续表单自动回填，但不得写回仓库配置
 - Web UI attempt 详情应展示 manifest metadata
 - Web UI 应支持取消 queued / running 的浏览器任务
 - Web UI 可快捷填充 demo dataset / demo provider，降低 smoke test 成本

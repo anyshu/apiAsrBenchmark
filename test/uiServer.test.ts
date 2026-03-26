@@ -55,6 +55,11 @@ test('ui index includes locale switcher for English and Chinese', async () => {
   assert.match(html, /id="locale-en"/);
   assert.match(html, /id="locale-zh"/);
   assert.match(html, /asr-bench-locale/);
+  assert.match(html, /asr-bench-provider-keys/);
+  assert.match(html, /data-nav="overview"/);
+  assert.match(html, /data-nav="create"/);
+  assert.match(html, /data-nav="jobs"/);
+  assert.match(html, /data-nav="providers"/);
 });
 
 test('ui server validation keeps provider API key overrides for the selected providers', async () => {

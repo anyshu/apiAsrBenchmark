@@ -707,23 +707,27 @@ export function renderIndexHtml(): string {
 
       .shell {
         display: grid;
-        grid-template-columns: 360px 1fr;
+        grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
         min-height: 100vh;
       }
 
-      .sidebar, .content {
-        padding: 24px;
-      }
-
       .sidebar {
+        display: grid;
+        align-content: start;
+        gap: 18px;
+        padding: 24px 20px 24px 24px;
         border-right: 1px solid var(--line);
         background: rgba(255,255,255,0.35);
         backdrop-filter: blur(12px);
+        min-width: 0;
       }
 
-      .content {
+      .workspace {
         display: grid;
-        gap: 16px;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 18px;
+        padding: 20px 24px 24px 20px;
+        min-width: 0;
       }
 
       h1, h2, h3, h4 { margin: 0; }
@@ -745,6 +749,43 @@ export function renderIndexHtml(): string {
         transform: scale(0.82);
         transform-origin: top right;
       }
+      .sidebar-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+      }
+      .sidebar-scroll {
+        min-height: 0;
+        overflow: auto;
+        padding-right: 4px;
+      }
+      .workspace-nav {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .nav-button {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 9px 14px;
+        background: rgba(255,255,255,0.62);
+        color: var(--muted);
+        cursor: pointer;
+        font: inherit;
+      }
+      .nav-button.active {
+        background: linear-gradient(135deg, rgba(13,122,95,0.96), rgba(10,102,82,0.92));
+        color: #fff;
+        border-color: rgba(13, 122, 95, 0.55);
+        box-shadow: 0 8px 22px rgba(13, 122, 95, 0.16);
+      }
+      .content {
+        display: grid;
+        gap: 16px;
+        min-width: 0;
+        align-content: start;
+      }
       .locale-switch button {
         border: 0;
         border-radius: 999px;
@@ -763,7 +804,6 @@ export function renderIndexHtml(): string {
       .run-list {
         display: grid;
         gap: 12px;
-        margin-top: 18px;
         min-width: 0;
       }
 
@@ -819,6 +859,10 @@ export function renderIndexHtml(): string {
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: 12px;
       }
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
 
       .split {
         display: grid;
@@ -841,7 +885,9 @@ export function renderIndexHtml(): string {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
         gap: 10px;
-        margin-top: 14px;
+      }
+      .controls.compact {
+        grid-template-columns: 1fr;
       }
 
       label {
@@ -861,6 +907,65 @@ export function renderIndexHtml(): string {
         background: rgba(255,255,255,0.8);
         color: var(--ink);
         font: inherit;
+      }
+      .section-intro {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+      .button-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button.action {
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.75);
+        cursor: pointer;
+        font: inherit;
+      }
+      button.action.primary {
+        width: 100%;
+        margin-top: 8px;
+        padding: 12px;
+        border-radius: 12px;
+        background: var(--accent);
+        color: white;
+      }
+      .form-grid {
+        display: grid;
+        gap: 14px;
+      }
+      .provider-pill-list {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .provider-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.72);
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .provider-pill input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+      }
+      .provider-key-grid {
+        display: grid;
+        gap: 10px;
       }
 
       .checkbox-row {
@@ -1009,6 +1114,7 @@ export function renderIndexHtml(): string {
       @media (max-width: 920px) {
         .shell { grid-template-columns: 1fr; }
         .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+        .workspace { padding-top: 0; }
       }
     </style>
   </head>
@@ -1025,31 +1131,39 @@ export function renderIndexHtml(): string {
             <button id="locale-zh" type="button">中文</button>
           </div>
         </div>
-        <div class="panel" style="margin-top:18px;">
+        <div class="panel">
           <h3 id="run-filters-title" style="margin-bottom:10px;">Run Filters</h3>
-          <div id="run-filter-controls" class="controls"></div>
+          <div id="run-filter-controls" class="controls compact"></div>
         </div>
-        <div class="panel" style="margin-top:16px;">
-          <h3 id="create-run-title" style="margin-bottom:10px;">Create Run</h3>
-          <div id="run-create-controls" class="controls"></div>
+        <div class="sidebar-scroll">
+          <div class="sidebar-heading">
+            <h3 id="run-list-title">Runs</h3>
+            <span class="muted" id="run-list-count"></span>
+          </div>
+          <div id="run-list" class="run-list" style="margin-top:12px;"></div>
         </div>
-        <div class="panel" style="margin-top:16px;">
-          <h3 id="background-jobs-title" style="margin-bottom:10px;">Background Jobs</h3>
-          <div id="job-list"></div>
-        </div>
-        <div class="panel" style="margin-top:16px;">
-          <h3 id="providers-title" style="margin-bottom:10px;">Providers</h3>
-          <div id="provider-capabilities"></div>
-        </div>
-        <div id="run-list" class="run-list"></div>
       </aside>
-      <main class="content" id="content">
-        <section class="panel empty" id="initial-loading">Loading benchmark runs...</section>
+      <main class="workspace">
+        <div class="workspace-nav" id="workspace-nav">
+          <button class="nav-button active" data-nav="overview" id="nav-overview" type="button">Overview</button>
+          <button class="nav-button" data-nav="create" id="nav-create" type="button">Create Run</button>
+          <button class="nav-button" data-nav="jobs" id="nav-jobs" type="button">Background Jobs</button>
+          <button class="nav-button" data-nav="providers" id="nav-providers" type="button">Providers</button>
+        </div>
+        <div class="content" id="content">
+          <section class="panel empty" id="initial-loading">Loading benchmark runs...</section>
+        </div>
       </main>
     </div>
     <script>
+      const STORAGE_KEYS = {
+        locale: 'asr-bench-locale',
+        nav: 'asr-bench-nav',
+        providerKeys: 'asr-bench-provider-keys',
+      };
       const state = {
         locale: detectPreferredLocale(),
+        activeNav: detectPreferredNav(),
         runs: [],
         providers: [],
         providerCapabilities: [],
@@ -1077,6 +1191,7 @@ export function renderIndexHtml(): string {
           referenceSidecar: false,
           referenceDir: '',
         },
+        providerKeyStorage: loadStoredProviderKeys(),
         isSubmittingRun: false,
         runFormErrors: {},
         runFormMessage: '',
@@ -1096,9 +1211,14 @@ export function renderIndexHtml(): string {
         en: {
           appSubtitle: 'SQLite-backed runs, latency, retries, transcript accuracy, and failure triage in one place.',
           runFiltersTitle: 'Run Filters',
+          runListTitle: 'Recent Runs',
           createRunTitle: 'Create Run',
           backgroundJobsTitle: 'Background Jobs',
           providersTitle: 'Providers',
+          navOverview: 'Overview',
+          navCreate: 'Create Run',
+          navJobs: 'Jobs',
+          navProviders: 'Providers',
           loadingRuns: 'Loading benchmark runs...',
           noRunsInDb: 'No benchmark runs found in the selected SQLite database.',
           failuresSuffix: 'failures',
@@ -1127,6 +1247,7 @@ export function renderIndexHtml(): string {
           providerKeyUsedForRun: 'Used for this run only',
           providerKeyLabel: '{provider} key',
           providerKeyEmpty: 'Select a provider to enter a run-specific key.',
+          providerKeyStoredHint: 'Saved in this browser only and re-used next time.',
           useDemoDataset: 'Use demo dataset',
           selectDemoProvider: 'Select demo provider',
           inputPath: 'Input path',
@@ -1231,9 +1352,14 @@ export function renderIndexHtml(): string {
         zh: {
           appSubtitle: '把 SQLite 持久化结果、延迟、重试、转写准确率和失败归因放到一个界面里查看。',
           runFiltersTitle: '运行筛选',
+          runListTitle: '最近运行',
           createRunTitle: '创建任务',
           backgroundJobsTitle: '后台任务',
           providersTitle: '服务商',
+          navOverview: '总览',
+          navCreate: '创建任务',
+          navJobs: '任务队列',
+          navProviders: '服务商',
           loadingRuns: '正在加载 Benchmark 运行记录...',
           noRunsInDb: '当前 SQLite 数据库里还没有 Benchmark 运行记录。',
           failuresSuffix: '次失败',
@@ -1262,6 +1388,7 @@ export function renderIndexHtml(): string {
           providerKeyUsedForRun: '仅用于本次运行',
           providerKeyLabel: '{provider} 密钥',
           providerKeyEmpty: '选中服务商后才能填写本次运行专用密钥。',
+          providerKeyStoredHint: '只保存在当前浏览器，下次打开会自动带回。',
           useDemoDataset: '使用 Demo 数据集',
           selectDemoProvider: '选择 Demo 服务商',
           inputPath: '输入路径',
@@ -1366,9 +1493,42 @@ export function renderIndexHtml(): string {
       };
 
       function detectPreferredLocale() {
-        const saved = window.localStorage.getItem('asr-bench-locale');
+        const saved = window.localStorage.getItem(STORAGE_KEYS.locale);
         if (saved === 'en' || saved === 'zh') return saved;
         return navigator.language && navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+      }
+
+      function detectPreferredNav() {
+        const saved = window.localStorage.getItem(STORAGE_KEYS.nav);
+        return ['overview', 'create', 'jobs', 'providers'].includes(saved) ? saved : 'overview';
+      }
+
+      function loadStoredProviderKeys() {
+        try {
+          const raw = window.localStorage.getItem(STORAGE_KEYS.providerKeys);
+          if (!raw) return {};
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+          return Object.fromEntries(
+            Object.entries(parsed)
+              .map(([providerId, value]) => [String(providerId).trim(), String(value ?? '').trim()])
+              .filter(([providerId, value]) => providerId && value),
+          );
+        } catch {
+          return {};
+        }
+      }
+
+      function persistStoredProviderKeys() {
+        window.localStorage.setItem(STORAGE_KEYS.providerKeys, JSON.stringify(state.providerKeyStorage));
+      }
+
+      function syncRunFormProviderKeys() {
+        state.runForm.providerApiKeys = Object.fromEntries(
+          state.runForm.providerIds
+            .map((providerId) => [providerId, state.providerKeyStorage[providerId] || ''])
+            .filter(([, value]) => value),
+        );
       }
 
       function t(key, values) {
@@ -1426,9 +1586,11 @@ export function renderIndexHtml(): string {
         document.getElementById('app-title').textContent = 'ASR Bench';
         document.getElementById('app-subtitle').textContent = t('appSubtitle');
         document.getElementById('run-filters-title').textContent = t('runFiltersTitle');
-        document.getElementById('create-run-title').textContent = t('createRunTitle');
-        document.getElementById('background-jobs-title').textContent = t('backgroundJobsTitle');
-        document.getElementById('providers-title').textContent = t('providersTitle');
+        document.getElementById('run-list-title').textContent = t('runListTitle');
+        document.getElementById('nav-overview').textContent = t('navOverview');
+        document.getElementById('nav-create').textContent = t('navCreate');
+        document.getElementById('nav-jobs').textContent = t('navJobs');
+        document.getElementById('nav-providers').textContent = t('navProviders');
         const initialLoading = document.getElementById('initial-loading');
         if (initialLoading) initialLoading.textContent = t('loadingRuns');
         ['en', 'zh'].forEach((locale) => {
@@ -1436,23 +1598,26 @@ export function renderIndexHtml(): string {
           if (!button) return;
           button.classList.toggle('active', state.locale === locale);
         });
+        document.querySelectorAll('[data-nav]').forEach((node) => {
+          node.classList.toggle('active', node.getAttribute('data-nav') === state.activeNav);
+        });
       }
 
       function setLocale(locale) {
         if (locale !== 'en' && locale !== 'zh') return;
         state.locale = locale;
-        window.localStorage.setItem('asr-bench-locale', locale);
+        window.localStorage.setItem(STORAGE_KEYS.locale, locale);
         renderShellChrome();
-        renderRunSidebarControls();
-        renderRunList();
-        if (state.activeRun) {
-          renderActiveRun();
-        } else {
-          const content = document.getElementById('content');
-          if (content && !state.runs.length) {
-            content.innerHTML = '<section class="panel empty">' + escapeHtml(t('runBenchmarkFirst')) + '</section>';
-          }
-        }
+        renderSidebar();
+        renderMainContent();
+      }
+
+      function setActiveNav(nav) {
+        if (!['overview', 'create', 'jobs', 'providers'].includes(nav)) return;
+        state.activeNav = nav;
+        window.localStorage.setItem(STORAGE_KEYS.nav, nav);
+        renderShellChrome();
+        renderMainContent();
       }
 
       function fmt(value) {
@@ -1473,6 +1638,8 @@ export function renderIndexHtml(): string {
 
       function renderRunList() {
         const root = document.getElementById('run-list');
+        const count = document.getElementById('run-list-count');
+        if (count) count.textContent = state.runs.length ? String(state.runs.length) : '';
         if (!state.runs.length) {
           root.innerHTML = '<div class="run-card">' + escapeHtml(t('noRunsInDb')) + '</div>';
           return;
@@ -1496,30 +1663,52 @@ export function renderIndexHtml(): string {
         });
       }
 
-      function renderRunSidebarControls() {
+      function renderSidebar() {
         renderRunFilterControls();
-        renderRunCreateControls();
-        renderJobList();
-        renderProviderCapabilities();
+        renderRunList();
+      }
+
+      function renderMainContent() {
+        if (state.activeNav === 'create') {
+          renderRunCreateControls();
+          return;
+        }
+        if (state.activeNav === 'jobs') {
+          renderJobList();
+          return;
+        }
+        if (state.activeNav === 'providers') {
+          renderProviderCapabilities();
+          return;
+        }
+        renderActiveRun();
       }
 
       function renderProviderCapabilities() {
-        const root = document.getElementById('provider-capabilities');
+        const root = document.getElementById('content');
         if (!root) return;
         if (!state.providerCapabilities.length) {
-          root.innerHTML = '<div class="muted">' + escapeHtml(t('noProviderCapabilities')) + '</div>';
+          root.innerHTML = '<section class="panel empty">' + escapeHtml(t('noProviderCapabilities')) + '</section>';
           return;
         }
 
-        root.innerHTML = state.providerCapabilities.map((item) =>
-          '<div class="run-card">' +
-            '<div class="tag">' + escapeHtml(item.type) + '</div>' +
-            '<div class="tag">' + escapeHtml(item.operation) + '</div>' +
-            '<h3 style="margin-top:10px;font-size:15px;">' + escapeHtml(item.provider_id) + '</h3>' +
-            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(item.default_model || t('noDefaultModel')) + '</p>' +
-            '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(t('timestamps')) + ': ' + escapeHtml((item.supports_word_timestamps || item.supports_segment_timestamps) ? t('yes') : t('no')) + '</p>' +
-          '</div>'
-        ).join('');
+        root.innerHTML =
+          '<section class="panel">' +
+            '<div class="section-intro">' +
+              '<div><h2>' + escapeHtml(t('providersTitle')) + '</h2><p class="muted" style="margin-top:8px;">' + escapeHtml(t('providerKeyStoredHint')) + '</p></div>' +
+            '</div>' +
+            '<div class="grid" style="margin-top:16px;">' +
+              state.providerCapabilities.map((item) =>
+                '<div class="run-card">' +
+                  '<div class="tag">' + escapeHtml(item.type) + '</div>' +
+                  '<div class="tag">' + escapeHtml(item.operation) + '</div>' +
+                  '<h3 style="margin-top:10px;font-size:15px;">' + escapeHtml(item.provider_id) + '</h3>' +
+                  '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(item.default_model || t('noDefaultModel')) + '</p>' +
+                  '<p class="muted" style="margin:8px 0 0;">' + escapeHtml(t('timestamps')) + ': ' + escapeHtml((item.supports_word_timestamps || item.supports_segment_timestamps) ? t('yes') : t('no')) + '</p>' +
+                '</div>'
+              ).join('') +
+            '</div>' +
+          '</section>';
       }
 
       function renderRunFilterControls() {
@@ -1551,12 +1740,12 @@ export function renderIndexHtml(): string {
       }
 
       function renderRunCreateControls() {
-        const root = document.getElementById('run-create-controls');
+        const root = document.getElementById('content');
         if (!root) return;
         const isDuration = state.runForm.mode === 'duration';
         const providerCheckboxes = state.providers.length
           ? state.providers.map((provider) =>
-              '<label class="checkbox-row">' +
+              '<label class="provider-pill">' +
                 '<input type="checkbox" class="run-provider-checkbox" value="' + escapeHtml(provider.provider_id) + '"' +
                 (state.runForm.providerIds.includes(provider.provider_id) ? ' checked' : '') +
                 ' /><span>' + escapeHtml(provider.provider_id) + '</span>' +
@@ -1585,35 +1774,42 @@ export function renderIndexHtml(): string {
           ? '<div class="detail-block" style="padding:10px 12px;font-size:12px;">' + escapeHtml(translateMessage(state.runFormMessage)) + '</div>'
           : '';
         const demoButtons = state.demoAssets
-          ? '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-              '<button id="run-form-use-demo" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">' + escapeHtml(t('useDemoDataset')) + '</button>' +
-              '<button id="run-form-use-demo-provider" type="button" style="padding:8px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,0.75);cursor:pointer;">' + escapeHtml(t('selectDemoProvider')) + '</button>' +
+          ? '<div class="button-row">' +
+              '<button id="run-form-use-demo" class="action" type="button">' + escapeHtml(t('useDemoDataset')) + '</button>' +
+              '<button id="run-form-use-demo-provider" class="action" type="button">' + escapeHtml(t('selectDemoProvider')) + '</button>' +
             '</div>'
           : '';
 
         root.innerHTML =
-          message +
-          demoButtons +
-          '<form id="run-create-form" style="display:grid;gap:10px;">' +
-            '<label>' + escapeHtml(t('mode')) + '<select id="run-form-mode">' +
-              '<option value="once"' + (state.runForm.mode === 'once' ? ' selected' : '') + '>' + escapeHtml(t('once')) + '</option>' +
-              '<option value="duration"' + (state.runForm.mode === 'duration' ? ' selected' : '') + '>' + escapeHtml(t('duration')) + '</option>' +
-            '</select></label>' + error('mode') +
-            '<label>' + escapeHtml(t('inputPath')) + '<input id="run-form-input" type="text" placeholder="/path/to/audio" value="' + escapeHtml(state.runForm.inputPath) + '" /></label>' + error('inputPath') +
-            '<label>' + escapeHtml(t('manifestPath')) + '<input id="run-form-manifest" type="text" placeholder="/path/to/manifest.json" value="' + escapeHtml(state.runForm.manifestPath) + '" /></label>' + error('manifestPath') +
-            '<label>' + escapeHtml(t('referenceDir')) + '<input id="run-form-reference-dir" type="text" placeholder="/path/to/references" value="' + escapeHtml(state.runForm.referenceDir) + '" /></label>' + error('referenceDir') +
-            '<label>' + escapeHtml(t('rounds')) + '<input id="run-form-rounds" type="number" min="1" value="' + escapeHtml(state.runForm.rounds) + '"' + (isDuration ? ' disabled' : '') + ' /></label>' + error('rounds') +
-            '<label>' + escapeHtml(t('durationMs')) + '<input id="run-form-duration" type="number" min="1" value="' + escapeHtml(state.runForm.durationMs) + '"' + (isDuration ? '' : ' disabled') + ' /></label>' + error('durationMs') +
-            '<label>' + escapeHtml(t('concurrency')) + '<input id="run-form-concurrency" type="number" min="1" value="' + escapeHtml(state.runForm.concurrency) + '" /></label>' + error('concurrency') +
-            '<label>' + escapeHtml(t('intervalMs')) + '<input id="run-form-interval" type="number" min="0" value="' + escapeHtml(state.runForm.intervalMs) + '" /></label>' + error('intervalMs') +
-            '<label class="checkbox-row"><input id="run-form-sidecar" type="checkbox"' + (state.runForm.referenceSidecar ? ' checked' : '') + ' /><span>' + escapeHtml(t('useSidecarReference')) + '</span></label>' +
-            (state.runFormErrors.providerIds ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(translateMessage(state.runFormErrors.providerIds)) + '</div>' : '') +
-            '<div style="display:grid;gap:6px;"><div class="muted" style="font-size:12px;">' + escapeHtml(t('providers')) + '</div><div class="checkbox-list">' + providerCheckboxes + '</div></div>' +
-            '<div style="display:grid;gap:6px;margin-top:10px;"><div class="muted" style="font-size:12px;">' + escapeHtml(t('providerKeys')) + '</div>' + providerKeyInputs + '</div>' +
-            '<button id="run-form-submit" type="submit" style="margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--accent);color:white;cursor:' + (state.isSubmittingRun ? 'wait' : 'pointer') + ';"' + (state.isSubmittingRun ? ' disabled' : '') + '>' +
-              escapeHtml(state.isSubmittingRun ? t('submitting') : t('queueRun')) +
-            '</button>' +
-          '</form>';
+          '<section class="panel stack">' +
+            '<div class="section-intro">' +
+              '<div><h2>' + escapeHtml(t('createRunTitle')) + '</h2><p class="muted" style="margin-top:8px;">' + escapeHtml(t('providerKeyStoredHint')) + '</p></div>' +
+              demoButtons +
+            '</div>' +
+            message +
+            '<form id="run-create-form" class="form-grid">' +
+              '<div class="grid">' +
+                '<div><label>' + escapeHtml(t('mode')) + '<select id="run-form-mode">' +
+                  '<option value="once"' + (state.runForm.mode === 'once' ? ' selected' : '') + '>' + escapeHtml(t('once')) + '</option>' +
+                  '<option value="duration"' + (state.runForm.mode === 'duration' ? ' selected' : '') + '>' + escapeHtml(t('duration')) + '</option>' +
+                '</select></label>' + error('mode') + '</div>' +
+                '<div><label>' + escapeHtml(t('inputPath')) + '<input id="run-form-input" type="text" placeholder="/path/to/audio" value="' + escapeHtml(state.runForm.inputPath) + '" /></label>' + error('inputPath') + '</div>' +
+                '<div><label>' + escapeHtml(t('manifestPath')) + '<input id="run-form-manifest" type="text" placeholder="/path/to/manifest.json" value="' + escapeHtml(state.runForm.manifestPath) + '" /></label>' + error('manifestPath') + '</div>' +
+                '<div><label>' + escapeHtml(t('referenceDir')) + '<input id="run-form-reference-dir" type="text" placeholder="/path/to/references" value="' + escapeHtml(state.runForm.referenceDir) + '" /></label>' + error('referenceDir') + '</div>' +
+                '<div><label>' + escapeHtml(t('rounds')) + '<input id="run-form-rounds" type="number" min="1" value="' + escapeHtml(state.runForm.rounds) + '"' + (isDuration ? ' disabled' : '') + ' /></label>' + error('rounds') + '</div>' +
+                '<div><label>' + escapeHtml(t('durationMs')) + '<input id="run-form-duration" type="number" min="1" value="' + escapeHtml(state.runForm.durationMs) + '"' + (isDuration ? '' : ' disabled') + ' /></label>' + error('durationMs') + '</div>' +
+                '<div><label>' + escapeHtml(t('concurrency')) + '<input id="run-form-concurrency" type="number" min="1" value="' + escapeHtml(state.runForm.concurrency) + '" /></label>' + error('concurrency') + '</div>' +
+                '<div><label>' + escapeHtml(t('intervalMs')) + '<input id="run-form-interval" type="number" min="0" value="' + escapeHtml(state.runForm.intervalMs) + '" /></label>' + error('intervalMs') + '</div>' +
+              '</div>' +
+              '<label class="checkbox-row"><input id="run-form-sidecar" type="checkbox"' + (state.runForm.referenceSidecar ? ' checked' : '') + ' /><span>' + escapeHtml(t('useSidecarReference')) + '</span></label>' +
+              (state.runFormErrors.providerIds ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(translateMessage(state.runFormErrors.providerIds)) + '</div>' : '') +
+              '<div class="detail-block"><div class="muted" style="font-size:12px;margin-bottom:10px;">' + escapeHtml(t('providers')) + '</div><div class="provider-pill-list">' + providerCheckboxes + '</div></div>' +
+              '<div class="detail-block"><div class="muted" style="font-size:12px;margin-bottom:6px;">' + escapeHtml(t('providerKeys')) + '</div><div class="muted" style="font-size:12px;margin-bottom:10px;">' + escapeHtml(t('providerKeyStoredHint')) + '</div><div class="provider-key-grid">' + providerKeyInputs + '</div></div>' +
+              '<button id="run-form-submit" class="action primary" type="submit" style="cursor:' + (state.isSubmittingRun ? 'wait' : 'pointer') + ';"' + (state.isSubmittingRun ? ' disabled' : '') + '>' +
+                escapeHtml(state.isSubmittingRun ? t('submitting') : t('queueRun')) +
+              '</button>' +
+            '</form>' +
+          '</section>';
 
         ['run-form-mode', 'run-form-input', 'run-form-manifest', 'run-form-reference-dir', 'run-form-rounds', 'run-form-duration', 'run-form-concurrency', 'run-form-interval', 'run-form-sidecar']
           .forEach((id) => {
@@ -1622,8 +1818,18 @@ export function renderIndexHtml(): string {
             node.addEventListener('input', updateRunFormFromDom);
             node.addEventListener('change', updateRunFormFromDom);
           });
+        const modeNode = document.getElementById('run-form-mode');
+        if (modeNode) {
+          modeNode.addEventListener('change', () => {
+            updateRunFormFromDom();
+            renderRunCreateControls();
+          });
+        }
         document.querySelectorAll('.run-provider-checkbox').forEach((node) => {
-          node.addEventListener('change', updateRunFormFromDom);
+          node.addEventListener('change', () => {
+            updateRunFormFromDom();
+            renderRunCreateControls();
+          });
         });
         document.querySelectorAll('.run-provider-key-input').forEach((node) => {
           node.addEventListener('input', updateRunFormFromDom);
@@ -1646,14 +1852,14 @@ export function renderIndexHtml(): string {
       }
 
       function renderJobList() {
-        const root = document.getElementById('job-list');
+        const root = document.getElementById('content');
         if (!root) return;
         if (!state.jobs.length) {
-          root.innerHTML = '<div class="muted">' + escapeHtml(t('noJobs')) + '</div>';
+          root.innerHTML = '<section class="panel empty">' + escapeHtml(t('noJobs')) + '</section>';
           return;
         }
 
-        root.innerHTML = state.jobs.map((job) => {
+        root.innerHTML = '<section class="panel"><div class="section-intro"><div><h2>' + escapeHtml(t('backgroundJobsTitle')) + '</h2></div></div><div class="stack" style="margin-top:16px;">' + state.jobs.map((job) => {
           const statusTag =
             job.status === 'succeeded'
               ? '<span class="tag">' + escapeHtml(t('done')) + '</span>'
@@ -1698,11 +1904,13 @@ export function renderIndexHtml(): string {
             cancelButton +
             runLink +
           '</div>';
-        }).join('');
+        }).join('') + '</div></section>';
 
         root.querySelectorAll('.job-open-run').forEach((node) => {
           node.addEventListener('click', async () => {
             const runId = node.getAttribute('data-run-id');
+            state.activeNav = 'overview';
+            renderShellChrome();
             await loadRuns(runId);
           });
         });
@@ -1723,18 +1931,18 @@ export function renderIndexHtml(): string {
         const response = await fetch('/api/runs?' + params.toString());
         const data = await response.json();
         state.runs = data.runs || [];
-        renderRunSidebarControls();
         const requestedRunId = preferredRunId || state.activeRunId;
         const nextRun =
           state.runs.find((run) => run.run_id === requestedRunId) ||
           state.runs[0] ||
           null;
         state.activeRunId = nextRun ? nextRun.run_id : null;
-        renderRunList();
+        renderSidebar();
         if (state.activeRunId) {
           await loadRun(state.activeRunId);
         } else {
-          document.getElementById('content').innerHTML = '<section class="panel empty">' + escapeHtml(t('runBenchmarkFirst')) + '</section>';
+          state.activeRun = null;
+          renderMainContent();
         }
       }
 
@@ -1745,28 +1953,38 @@ export function renderIndexHtml(): string {
         if (!state.runForm.providerIds.length && state.providers[0]) {
           state.runForm.providerIds = [state.providers[0].provider_id];
         }
-        renderRunSidebarControls();
+        syncRunFormProviderKeys();
+        renderSidebar();
+        if (state.activeNav === 'create') {
+          renderRunCreateControls();
+        }
       }
 
       async function loadProviderCapabilities() {
         const response = await fetch('/api/provider-capabilities');
         const data = await response.json();
         state.providerCapabilities = data.providers || [];
-        renderProviderCapabilities();
+        if (state.activeNav === 'providers') {
+          renderProviderCapabilities();
+        }
       }
 
       async function loadDemoAssets() {
         const response = await fetch('/api/demo-assets');
         const data = await response.json();
         state.demoAssets = data;
-        renderRunCreateControls();
+        if (state.activeNav === 'create') {
+          renderRunCreateControls();
+        }
       }
 
       async function loadJobs() {
         const response = await fetch('/api/jobs?limit=8');
         const data = await response.json();
         state.jobs = data.jobs || [];
-        renderJobList();
+        if (state.activeNav === 'jobs') {
+          renderJobList();
+        }
 
         let preferredRunId = null;
         state.jobs.forEach((job) => {
@@ -1781,6 +1999,8 @@ export function renderIndexHtml(): string {
 
         if (preferredRunId) {
           state.runFormMessage = t('backgroundJobFinished');
+          state.activeNav = 'overview';
+          renderShellChrome();
           await loadRuns(preferredRunId);
         }
 
@@ -1794,6 +2014,9 @@ export function renderIndexHtml(): string {
         });
         state.runFormMessage = t('cancellationRequested');
         await loadJobs();
+        if (state.activeNav === 'create') {
+          renderRunCreateControls();
+        }
       }
 
       async function loadRun(runId) {
@@ -1807,10 +2030,10 @@ export function renderIndexHtml(): string {
         state.rawAttemptById = {};
         state.selectedAttemptId = data.attempts?.[0]?.attempt_id || null;
         resetFiltersForRun(data);
-        renderActiveRun();
+        renderMainContent();
         if (state.selectedAttemptId) {
           await ensureRawAttemptLoaded(state.selectedAttemptId);
-          renderActiveRun();
+          renderMainContent();
         }
       }
 
@@ -1831,7 +2054,10 @@ export function renderIndexHtml(): string {
       }
 
       function renderActiveRun() {
-        if (!state.activeRun) return;
+        if (!state.activeRun) {
+          document.getElementById('content').innerHTML = '<section class="panel empty">' + escapeHtml(t('runBenchmarkFirst')) + '</section>';
+          return;
+        }
         const summary = state.activeRun.summary;
         const attempts = filteredAttempts();
         const selectedAttempt = resolveSelectedAttempt(attempts, state.activeRun.attempts || []);
@@ -2016,14 +2242,23 @@ export function renderIndexHtml(): string {
         state.runForm.concurrency = document.getElementById('run-form-concurrency').value.trim();
         state.runForm.intervalMs = document.getElementById('run-form-interval').value.trim();
         state.runForm.referenceSidecar = document.getElementById('run-form-sidecar').checked;
-        state.runForm.providerIds = Array.from(document.querySelectorAll('.run-provider-checkbox'))
+        const selectedProviderIds = Array.from(document.querySelectorAll('.run-provider-checkbox'))
           .filter((node) => node.checked)
           .map((node) => node.value);
-        state.runForm.providerApiKeys = Object.fromEntries(
-          Array.from(document.querySelectorAll('.run-provider-key-input'))
-            .map((node) => [node.getAttribute('data-provider-id'), node.value.trim()])
-            .filter((entry) => entry[0] && entry[1])
-        );
+        Array.from(document.querySelectorAll('.run-provider-key-input'))
+          .forEach((node) => {
+            const providerId = node.getAttribute('data-provider-id');
+            const value = node.value.trim();
+            if (!providerId) return;
+            if (value) {
+              state.providerKeyStorage[providerId] = value;
+            } else {
+              delete state.providerKeyStorage[providerId];
+            }
+          });
+        persistStoredProviderKeys();
+        state.runForm.providerIds = selectedProviderIds;
+        syncRunFormProviderKeys();
         state.runFormErrors = {};
         state.runFormMessage = '';
       }
@@ -2089,7 +2324,7 @@ export function renderIndexHtml(): string {
           window.__asrBenchJobPollTimer = setTimeout(() => {
             loadJobs().catch((error) => {
               state.runFormMessage = error && error.message ? error.message : String(error);
-              renderRunSidebarControls();
+              renderMainContent();
             });
           }, 1500);
         }
@@ -2385,6 +2620,9 @@ export function renderIndexHtml(): string {
       renderShellChrome();
       document.getElementById('locale-en').addEventListener('click', () => setLocale('en'));
       document.getElementById('locale-zh').addEventListener('click', () => setLocale('zh'));
+      document.querySelectorAll('[data-nav]').forEach((node) => {
+        node.addEventListener('click', () => setActiveNav(node.getAttribute('data-nav')));
+      });
 
       Promise.all([loadProviders(), loadProviderCapabilities(), loadDemoAssets(), loadJobs(), loadRuns()]).catch((error) => {
         document.getElementById('content').innerHTML =
