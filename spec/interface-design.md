@@ -307,6 +307,9 @@ GET /
 {
   "mode": "once",
   "providerIds": ["openai-whisper"],
+  "providerApiKeys": {
+    "openai-whisper": "run-scoped-secret"
+  },
   "inputPath": "/path/to/audio",
   "rounds": 1,
   "durationMs": 30000,
@@ -317,6 +320,10 @@ GET /
   "referenceDir": "/path/to/references"
 }
 ```
+
+说明：
+- `providerApiKeys` 仅对本次 UI 触发的 run 生效
+- 服务端在 job 响应中不会回显这些 key
 
 错误返回：
 

@@ -48,7 +48,14 @@ export async function loadProvidersConfig(configPath: string): Promise<Providers
   return { providers };
 }
 
-export function resolveProviderSecrets(provider: ProviderConfig): ProviderConfig {
+export function resolveProviderSecrets(provider: ProviderConfig, apiKeyOverride?: string): ProviderConfig {
+  if (apiKeyOverride) {
+    return {
+      ...provider,
+      api_key: apiKeyOverride,
+    };
+  }
+
   if (provider.api_key || !provider.api_key_env) {
     return provider;
   }

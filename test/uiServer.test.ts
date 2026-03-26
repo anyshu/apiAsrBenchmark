@@ -50,6 +50,31 @@ test('ui server validation rejects missing paths and providers', async () => {
   assert.match(validation.fieldErrors.providerIds ?? '', /select at least one provider/i);
 });
 
+test('ui server validation keeps provider API key overrides for the selected providers', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'audioapibench-ui-keys-'));
+  const audioDir = path.join(tempRoot, 'audio');
+  await fs.mkdir(audioDir, { recursive: true });
+  await createTempAudioFile(audioDir, 'sample.wav');
+
+  const validation = await validateRunSubmission(
+    {
+      mode: 'once',
+      providerIds: ['openai-whisper-demo'],
+      providerApiKeys: {
+        'openai-whisper-demo': ' test-key ',
+        ignored: 'should-not-matter',
+      },
+      inputPath: audioDir,
+    },
+    ['openai-whisper-demo'],
+  );
+
+  assert.equal(validation.ok, true);
+  assert.deepEqual(validation.value?.providerApiKeys, {
+    'openai-whisper-demo': 'test-key',
+  });
+});
+
 test('ui server background job runner persists manifest metadata', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'audioapibench-ui-job-'));
   const providerDir = path.join(tempRoot, 'providers');
@@ -86,7 +111,7 @@ test('ui server background job runner persists manifest metadata', async () => {
       'name: OpenAI Whisper Demo',
       'type: openai_compatible',
       'base_url: https://api.example.com/v1',
-      'api_key: test-key',
+      'api_key_env: OPENAI_API_KEY',
       'default_model: gpt-4o-mini-transcribe',
       'adapter_options:',
       '  operation: audio_transcriptions',
@@ -98,6 +123,9 @@ test('ui server background job runner persists manifest metadata', async () => {
     {
       mode: 'once',
       providerIds: ['openai-whisper-demo'],
+      providerApiKeys: {
+        'openai-whisper-demo': 'ui-key-override',
+      },
       inputPath: audioDir,
       manifestPath: path.join(audioDir, 'dataset.manifest.json'),
     },
@@ -140,6 +168,7 @@ test('ui server background job runner persists manifest metadata', async () => {
   const completedJob = jobs.get(job.job_id);
   assert.equal(completedJob?.status, 'succeeded');
   assert.ok(completedJob?.summary?.attempts_path);
+  assert.equal(job.request.providerApiKeys['openai-whisper-demo'], 'ui-key-override');
 
   const attemptsJsonl = await fs.readFile(completedJob!.summary!.attempts_path, 'utf8');
   assert.match(attemptsJsonl, /"audio_language":"zh"/);
@@ -163,7 +192,7 @@ test('ui server background job runner supports cooperative cancellation', async 
       'name: OpenAI Whisper Demo',
       'type: openai_compatible',
       'base_url: https://api.example.com/v1',
-      'api_key: test-key',
+      'api_key_env: OPENAI_API_KEY',
       'default_model: gpt-4o-mini-transcribe',
       'adapter_options:',
       '  operation: audio_transcriptions',
@@ -175,6 +204,9 @@ test('ui server background job runner supports cooperative cancellation', async 
     {
       mode: 'once',
       providerIds: ['openai-whisper-demo'],
+      providerApiKeys: {
+        'openai-whisper-demo': 'ui-key-override',
+      },
       inputPath: audioDir,
       rounds: 3,
     },

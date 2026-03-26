@@ -18,6 +18,7 @@ import { attachReferenceTexts, evaluateTranscript } from './references.js';
 export interface RunDurationOptions {
   configPath: string;
   providerIds: string[];
+  providerApiKeys?: Record<string, string>;
   inputPath: string;
   durationMs: number;
   concurrency?: number;
@@ -67,7 +68,9 @@ export async function runDuration(options: RunDurationOptions): Promise<BenchRun
     throw new Error(`Providers not found: ${missing.join(', ')}`);
   }
 
-  const providers = selectedProviders.map((provider) => resolveProviderSecrets(provider));
+  const providers = selectedProviders.map((provider) =>
+    resolveProviderSecrets(provider, options.providerApiKeys?.[provider.provider_id]),
+  );
   const catalogedAudioAssets = await applyDatasetManifest(await collectAudioAssets(options.inputPath), {
     inputPath: options.inputPath,
     manifestPath: options.manifestPath,

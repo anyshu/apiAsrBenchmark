@@ -29,6 +29,7 @@ export interface RunningUiServer {
 interface RunSubmissionPayload {
   mode: 'once' | 'duration';
   providerIds: string[];
+  providerApiKeys?: Record<string, string>;
   inputPath: string;
   rounds?: number;
   durationMs?: number;
@@ -42,6 +43,7 @@ interface RunSubmissionPayload {
 export interface RunSubmission {
   mode: 'once' | 'duration';
   providerIds: string[];
+  providerApiKeys: Record<string, string>;
   inputPath: string;
   rounds: number;
   durationMs: number;
@@ -92,6 +94,16 @@ export interface UiRunJob {
   error?: {
     message: string;
     field_errors?: Record<string, string>;
+  };
+}
+
+function redactJobForResponse(job: UiRunJob): UiRunJob {
+  return {
+    ...job,
+    request: {
+      ...job.request,
+      providerApiKeys: {},
+    },
   };
 }
 
@@ -169,7 +181,7 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
 
       if (requestUrl.pathname === '/api/jobs') {
         const limit = Number.parseInt(requestUrl.searchParams.get('limit') ?? '10', 10);
-        const jobs = listRunJobs(runJobs, Number.isFinite(limit) ? limit : 10);
+        const jobs = listRunJobs(runJobs, Number.isFinite(limit) ? limit : 10).map((job) => redactJobForResponse(job));
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ jobs }, null, 2));
         return;
@@ -184,7 +196,7 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
           return;
         }
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ job }, null, 2));
+        response.end(JSON.stringify({ job: redactJobForResponse(job) }, null, 2));
         return;
       }
 
@@ -215,7 +227,7 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
         };
         runJobs.set(job.job_id, job);
         response.writeHead(202, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ job }, null, 2));
+        response.end(JSON.stringify({ job: redactJobForResponse(job) }, null, 2));
         return;
       }
 
@@ -311,7 +323,7 @@ export async function startUiServer(options: UiServerOptions): Promise<RunningUi
         void executeRunJob(job, options, runJobs);
 
         response.writeHead(202, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ job }, null, 2));
+        response.end(JSON.stringify({ job: redactJobForResponse(job) }, null, 2));
         return;
       }
 
@@ -389,6 +401,15 @@ export async function validateRunSubmission(
     }
   }
 
+  const providerApiKeys =
+    payload.providerApiKeys && typeof payload.providerApiKeys === 'object'
+      ? Object.fromEntries(
+          Object.entries(payload.providerApiKeys)
+            .map(([providerId, apiKey]) => [String(providerId).trim(), String(apiKey ?? '').trim()])
+            .filter(([providerId, apiKey]) => providerId && apiKey && providerIds.includes(providerId)),
+        )
+      : {};
+
   if (manifestPath && !(await pathExists(manifestPath))) {
     fieldErrors.manifestPath = 'Manifest path does not exist.';
   }
@@ -422,6 +443,7 @@ export async function validateRunSubmission(
     value: {
       mode,
       providerIds,
+      providerApiKeys,
       inputPath,
       rounds,
       durationMs,
@@ -459,6 +481,7 @@ export async function executeRunJob(
         ? await runDuration({
             configPath: options.configPath,
             providerIds: job.request.providerIds,
+            providerApiKeys: job.request.providerApiKeys,
             inputPath: job.request.inputPath,
             durationMs: job.request.durationMs,
             concurrency: job.request.concurrency,
@@ -486,6 +509,7 @@ export async function executeRunJob(
         : await runOnce({
             configPath: options.configPath,
             providerIds: job.request.providerIds,
+            providerApiKeys: job.request.providerApiKeys,
             inputPath: job.request.inputPath,
             rounds: job.request.rounds,
             dbPath: options.dbPath,
@@ -924,6 +948,7 @@ function renderIndexHtml(): string {
         runForm: {
           mode: 'once',
           providerIds: [],
+          providerApiKeys: {},
           inputPath: '',
           rounds: '1',
           durationMs: '30000',
@@ -1056,6 +1081,22 @@ function renderIndexHtml(): string {
               '</label>'
             ).join('')
           : '<div class="muted">No providers loaded.</div>';
+        const selectedProviders = state.providers.filter((provider) => state.runForm.providerIds.includes(provider.provider_id));
+        const providerKeyInputs = selectedProviders.length
+          ? '<div style="display:grid;gap:10px;margin-top:4px;">' +
+              selectedProviders.map((provider) => {
+                const hint = provider.api_key_env
+                  ? 'Overrides ' + provider.api_key_env + ' for this run only'
+                  : provider.api_key
+                    ? 'Overrides the configured API key for this run only'
+                    : 'Used for this run only';
+                return '<label style="text-transform:none;letter-spacing:0;font-size:13px;">' +
+                  provider.provider_id + ' key' +
+                  '<input class="run-provider-key-input" data-provider-id="' + escapeHtml(provider.provider_id) + '" type="password" placeholder="' + escapeHtml(hint) + '" value="' + escapeHtml(state.runForm.providerApiKeys[provider.provider_id] || '') + '" autocomplete="off" />' +
+                '</label>';
+              }).join('') +
+            '</div>'
+          : '<div class="muted">Select a provider to enter a run-specific key.</div>';
 
         const error = (field) => state.runFormErrors[field] ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(state.runFormErrors[field]) + '</div>' : '';
         const message = state.runFormMessage
@@ -1085,6 +1126,7 @@ function renderIndexHtml(): string {
           '<label style="text-transform:none;letter-spacing:0;font-size:13px;"><input id="run-form-sidecar" type="checkbox"' + (state.runForm.referenceSidecar ? ' checked' : '') + ' /> Use sidecar reference txt</label>' +
           (state.runFormErrors.providerIds ? '<div class="muted" style="color:#b94a32;">' + escapeHtml(state.runFormErrors.providerIds) + '</div>' : '') +
           '<div style="display:grid;gap:6px;"><div class="muted" style="font-size:12px;">Providers</div>' + providerCheckboxes + '</div>' +
+          '<div style="display:grid;gap:6px;margin-top:10px;"><div class="muted" style="font-size:12px;">Provider keys (optional, run-scoped override)</div>' + providerKeyInputs + '</div>' +
           '<button id="run-form-submit" style="margin-top:8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--accent);color:white;cursor:' + (state.isSubmittingRun ? 'wait' : 'pointer') + ';"' + (state.isSubmittingRun ? ' disabled' : '') + '>' +
             (state.isSubmittingRun ? 'Submitting...' : 'Queue Run') +
           '</button>';
@@ -1098,6 +1140,9 @@ function renderIndexHtml(): string {
           });
         document.querySelectorAll('.run-provider-checkbox').forEach((node) => {
           node.addEventListener('change', updateRunFormFromDom);
+        });
+        document.querySelectorAll('.run-provider-key-input').forEach((node) => {
+          node.addEventListener('input', updateRunFormFromDom);
         });
         const submit = document.getElementById('run-form-submit');
         if (submit) {
@@ -1487,6 +1532,11 @@ function renderIndexHtml(): string {
         state.runForm.providerIds = Array.from(document.querySelectorAll('.run-provider-checkbox'))
           .filter((node) => node.checked)
           .map((node) => node.value);
+        state.runForm.providerApiKeys = Object.fromEntries(
+          Array.from(document.querySelectorAll('.run-provider-key-input'))
+            .map((node) => [node.getAttribute('data-provider-id'), node.value.trim()])
+            .filter((entry) => entry[0] && entry[1])
+        );
         state.runFormErrors = {};
         state.runFormMessage = '';
       }
@@ -1574,6 +1624,7 @@ function renderIndexHtml(): string {
           const payload = {
             mode: state.runForm.mode,
             providerIds: state.runForm.providerIds,
+            providerApiKeys: state.runForm.providerApiKeys,
             inputPath: state.runForm.inputPath,
             rounds: Number.parseInt(state.runForm.rounds || '1', 10),
             durationMs: Number.parseInt(state.runForm.durationMs || '30000', 10),

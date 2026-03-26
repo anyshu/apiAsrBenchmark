@@ -13,6 +13,7 @@ import { attachReferenceTexts, evaluateTranscript } from './references.js';
 export interface RunOnceOptions {
   configPath: string;
   providerIds: string[];
+  providerApiKeys?: Record<string, string>;
   inputPath: string;
   rounds?: number;
   outputRoot?: string;
@@ -53,7 +54,9 @@ export async function runOnce(options: RunOnceOptions): Promise<BenchRunSummary>
     throw new Error('rounds must be >= 1');
   }
 
-  const providers = selectedProviders.map((provider) => resolveProviderSecrets(provider));
+  const providers = selectedProviders.map((provider) =>
+    resolveProviderSecrets(provider, options.providerApiKeys?.[provider.provider_id]),
+  );
   const catalogedAudioAssets = await applyDatasetManifest(await collectAudioAssets(options.inputPath), {
     inputPath: options.inputPath,
     manifestPath: options.manifestPath,
